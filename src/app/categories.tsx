@@ -5,8 +5,8 @@
  * via the `ON DELETE SET NULL` foreign key), so recorded amounts are never
  * lost. Categories are synced, so changes reach the cloud on the next push.
  */
-import { router, useFocusEffect } from 'expo-router';
-import { ChevronLeft, Pencil, Plus, Trash2 } from 'lucide-react-native';
+import { useFocusEffect } from 'expo-router';
+import { Pencil, Plus, Trash2 } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -16,6 +16,7 @@ import { EmptyState } from '@/components/empty-state';
 import { IconPicker } from '@/components/icon-picker';
 import { LargeButton } from '@/components/large-button';
 import { Screen } from '@/components/screen';
+import { ScreenHeader } from '@/components/screen-header';
 import { Segment } from '@/components/segment';
 import { TextField } from '@/components/text-field';
 import { ThemedText } from '@/components/themed-text';
@@ -101,16 +102,7 @@ export default function CategoriesScreen() {
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          style={styles.back}>
-          <ChevronLeft size={28} color={theme.text} />
-        </Pressable>
-        <ThemedText type="subtitle">Categories</ThemedText>
-      </View>
+      <ScreenHeader title="Categories" />
 
       <Segment
         options={[
@@ -186,15 +178,6 @@ export default function CategoriesScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  back: {
-    paddingVertical: Spacing.one,
-    paddingRight: Spacing.two,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

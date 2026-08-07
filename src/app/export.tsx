@@ -5,10 +5,8 @@
  * customizable options, and multiple export formats.
  */
 
-import { router } from 'expo-router';
 import {
   CalendarRange,
-  ChevronLeft,
   FileText,
   FileSpreadsheet,
   Share2,
@@ -23,6 +21,7 @@ import { Card } from '@/components/card';
 import { feedback } from '@/components/feedback';
 import { LargeButton } from '@/components/large-button';
 import { Screen } from '@/components/screen';
+import { ScreenHeader } from '@/components/screen-header';
 import { TextField } from '@/components/text-field';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
@@ -247,16 +246,7 @@ export default function ExportScreen() {
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          style={styles.back}>
-          <ChevronLeft size={28} color={theme.text} />
-        </Pressable>
-        <ThemedText type="subtitle">Reports & Export</ThemedText>
-      </View>
+      <ScreenHeader title="Reports & Export" />
 
       {/* Report Type Selection */}
       <Card style={styles.section}>
@@ -510,16 +500,6 @@ export default function ExportScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    marginBottom: Spacing.three,
-  },
-  back: {
-    paddingVertical: Spacing.one,
-    paddingRight: Spacing.two,
-  },
   section: {
     gap: Spacing.two,
     marginBottom: Spacing.two,

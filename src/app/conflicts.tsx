@@ -7,16 +7,16 @@
  * default) or restore their own version, which is written back and queued for
  * re-upload.
  */
-import { router } from 'expo-router';
-import { AlertTriangle, Check, ChevronLeft, RotateCcw } from 'lucide-react-native';
+import { AlertTriangle, Check, RotateCcw } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/card';
 import { EmptyState } from '@/components/empty-state';
 import { feedback } from '@/components/feedback';
 import { LargeButton } from '@/components/large-button';
 import { Screen } from '@/components/screen';
+import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -140,18 +140,7 @@ export default function ConflictsScreen() {
 
   return (
     <Screen scroll>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          style={styles.back}>
-          <ChevronLeft size={28} color={theme.text} />
-        </Pressable>
-        <ThemedText type="subtitle" numberOfLines={1} style={styles.title}>
-          Conflicts
-        </ThemedText>
-      </View>
+      <ScreenHeader title="Conflicts" />
 
       <ThemedText type="small" themeColor="textSecondary">
         {pendingCount === 0
@@ -249,18 +238,6 @@ export default function ConflictsScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  back: {
-    padding: 4,
-    marginLeft: -4,
-  },
-  title: {
-    flex: 1,
-  },
   loader: {
     marginTop: Spacing.five,
   },

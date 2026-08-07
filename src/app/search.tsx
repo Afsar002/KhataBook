@@ -5,15 +5,15 @@
  * its detail screen; transaction rows are read-only (like the Home recent list).
  */
 import { router } from 'expo-router';
-import { ChevronLeft } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { AccountItem } from '@/components/account-item';
 import { Card } from '@/components/card';
 import { EmptyState } from '@/components/empty-state';
 import { PartyItem } from '@/components/party-item';
 import { Screen } from '@/components/screen';
+import { ScreenHeader } from '@/components/screen-header';
 import { SearchInput } from '@/components/search-input';
 import { ThemedText } from '@/components/themed-text';
 import { TransactionItem } from '@/components/transaction-item';
@@ -37,18 +37,7 @@ export default function SearchScreen() {
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          style={styles.back}>
-          <ChevronLeft size={28} color={theme.text} />
-        </Pressable>
-        <ThemedText type="subtitle" style={styles.title}>
-          Search
-        </ThemedText>
-      </View>
+      <ScreenHeader title="Search" />
 
       <SearchInput
         value={query}
@@ -131,18 +120,6 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  back: {
-    paddingVertical: Spacing.one,
-    paddingRight: Spacing.two,
-  },
-  title: {
-    flex: 1,
-  },
   spinner: {
     paddingVertical: Spacing.two,
   },

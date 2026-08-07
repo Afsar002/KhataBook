@@ -6,7 +6,6 @@
  * counted cash in hand and the difference is colour-coded — green when it
  * matches, amber when cash is short or extra.
  */
-import { router } from 'expo-router';
 import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Scale } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -15,6 +14,7 @@ import { AmountInput } from '@/components/amount-input';
 import { Card } from '@/components/card';
 import { LargeButton } from '@/components/large-button';
 import { Screen } from '@/components/screen';
+import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useCashBook } from '@/hooks/use-cash-book';
@@ -86,16 +86,7 @@ export default function CashBookScreen() {
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          style={styles.back}>
-          <ChevronLeft size={28} color={theme.text} />
-        </Pressable>
-        <ThemedText type="subtitle">Cash Book</ThemedText>
-      </View>
+      <ScreenHeader title="Cash Book" />
 
       <Card style={styles.dateCard}>
         <Pressable
@@ -218,15 +209,6 @@ function SummaryRow({
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  back: {
-    paddingVertical: Spacing.one,
-    paddingRight: Spacing.two,
-  },
   dateCard: {
     flexDirection: 'row',
     alignItems: 'center',
