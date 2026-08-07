@@ -10,14 +10,16 @@ import { KhataSummaryCard } from '@/components/khata-summary-card';
 import { PartyItem } from '@/components/party-item';
 import { Segment } from '@/components/segment';
 import { ThemedText } from '@/components/themed-text';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useKhataSummary } from '@/hooks/use-khata-summary';
 import { useParties } from '@/hooks/use-parties';
+import { useResponsiveLayout } from '@/hooks/use-responsive';
 import { useTheme } from '@/hooks/use-theme';
 import type { PartyBalance, PartyType } from '@/types';
 
 export default function KhataScreen() {
   const theme = useTheme();
+  const { contentMaxWidth } = useResponsiveLayout();
   const [type, setType] = useState<PartyType>('customer');
   const { parties, refresh } = useParties(type);
   const { summary, refresh: refreshSummary } = useKhataSummary();
@@ -37,7 +39,7 @@ export default function KhataScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
-      <View style={styles.container}>
+      <View style={[styles.container, { maxWidth: contentMaxWidth }]}>
         <View style={styles.header}>
           <ThemedText type="subtitle">Khata</ThemedText>
           <Pressable
@@ -94,7 +96,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     width: '100%',
-    maxWidth: MaxContentWidth,
     alignSelf: 'center',
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.three,

@@ -14,10 +14,11 @@ import { SearchInput } from '@/components/search-input';
 import { Segment, type SegmentOption } from '@/components/segment';
 import { ThemedText } from '@/components/themed-text';
 import { TransactionItem } from '@/components/transaction-item';
-import { InterFonts, MaxContentWidth, Spacing } from '@/constants/theme';
+import { InterFonts, Spacing } from '@/constants/theme';
 import { editRouteForLedgerRow } from '@/db/transaction-repo';
 import { useFilterOptions } from '@/hooks/use-filter-options';
 import { useLedger } from '@/hooks/use-ledger';
+import { useResponsiveLayout } from '@/hooks/use-responsive';
 import { useTheme } from '@/hooks/use-theme';
 import type { LedgerKind, LedgerRow } from '@/types';
 import { formatDateLabel } from '@/utils/format';
@@ -38,6 +39,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export default function HistoryScreen() {
   const theme = useTheme();
+  const { contentMaxWidth } = useResponsiveLayout();
   const { entries, hasMore, loadMore, loadingMore, refresh } = useLedger();
   const { accounts, categories } = useFilterOptions();
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -125,7 +127,7 @@ export default function HistoryScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
-      <View style={styles.container}>
+      <View style={[styles.container, { maxWidth: contentMaxWidth }]}>
         <ThemedText type="subtitle">History</ThemedText>
 
         <SearchInput value={query} onChangeText={setQuery} placeholder="Search entries…" />
@@ -193,7 +195,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     width: '100%',
-    maxWidth: MaxContentWidth,
     alignSelf: 'center',
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.three,

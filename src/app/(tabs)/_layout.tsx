@@ -1,11 +1,14 @@
-import { Tabs } from 'expo-router';
-import { BarChart3, BookOpen, History, Home, Settings, type LucideIcon } from 'lucide-react-native';
+import { Slot, Tabs } from 'expo-router';
+import { BarChart3, BookOpen, History, Home, Settings } from 'lucide-react-native';
+import { StyleSheet, View } from 'react-native';
 
+import { Sidebar, type SidebarItem } from '@/components/sidebar';
 import { InterFonts } from '@/constants/theme';
+import { useResponsiveLayout } from '@/hooks/use-responsive';
 import { useTheme } from '@/hooks/use-theme';
 
 /** Route → tab title/icon, kept in one place so renames are a one-liner. */
-const TAB_META: { name: string; title: string; Icon: LucideIcon }[] = [
+const TAB_META: SidebarItem[] = [
   { name: 'index', title: 'Home', Icon: Home },
   { name: 'history', title: 'History', Icon: History },
   { name: 'khata', title: 'Khata', Icon: BookOpen },
@@ -15,6 +18,20 @@ const TAB_META: { name: string; title: string; Icon: LucideIcon }[] = [
 
 export default function TabsLayout() {
   const theme = useTheme();
+  const { isWide } = useResponsiveLayout();
+
+  // Wide windows (tablet landscape / desktop) swap the bottom tab bar for a
+  // left navigation rail; the active tab renders into the Slot beside it.
+  if (isWide) {
+    return (
+      <View style={[styles.desktopShell, { backgroundColor: theme.background }]}>
+        <Sidebar items={TAB_META} />
+        <View style={styles.desktopContent}>
+          <Slot />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <Tabs
@@ -38,3 +55,13 @@ export default function TabsLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  desktopShell: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  desktopContent: {
+    flex: 1,
+  },
+});
