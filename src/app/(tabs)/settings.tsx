@@ -27,6 +27,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { Card } from '@/components/card';
+import { Chip } from '@/components/chip';
 import { feedback } from '@/components/feedback';
 import { LargeButton } from '@/components/large-button';
 import { Screen } from '@/components/screen';
@@ -125,13 +126,33 @@ function formatLastSync(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
+/** Periodic auto-sync frequency options shown as chips (0 = off). */
+const SYNC_INTERVAL_OPTIONS = [
+  { label: 'Off', minutes: 0 },
+  { label: '15 min', minutes: 15 },
+  { label: '30 min', minutes: 30 },
+  { label: '1 hr', minutes: 60 },
+];
+
 /** Cloud Sync card — shows the live account/status when configured, or the offline prompt. */
 function CloudSyncCard() {
   const theme = useTheme();
   const router = useRouter();
   const { status: authStatus, account, signOut } = useAuth();
-  const { status, lastSyncAt, lastResult, syncing, realtimeMode, autoSync, setAutoSync, runNow } =
-    useSync();
+  const {
+    status,
+    lastSyncAt,
+    lastResult,
+    syncing,
+    realtimeMode,
+    autoSync,
+    setAutoSync,
+    wifiOnly,
+    setWifiOnly,
+    intervalMinutes,
+    setIntervalMinutes,
+    runNow,
+  } = useSync();
   const lastSyncFrom = useLastSyncFrom();
   const [deviceName, setDeviceNameState] = useState('');
   const [deviceBusy, setDeviceBusy] = useState(false);
@@ -344,6 +365,44 @@ function CloudSyncCard() {
           thumbColor="#FFFFFF"
           accessibilityLabel="Auto sync"
         />
+      </View>
+
+      <View style={styles.row}>
+        <View style={styles.rowLabel}>
+          <ThemedText type="default">Wi-Fi only</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            Don&apos;t auto-sync on mobile data
+          </ThemedText>
+        </View>
+        <Switch
+          value={wifiOnly}
+          onValueChange={setWifiOnly}
+          trackColor={{ true: theme.primary, false: theme.border }}
+          thumbColor="#FFFFFF"
+          accessibilityLabel="Wi-Fi only"
+        />
+      </View>
+
+      <View style={styles.row}>
+        <View style={styles.rowLabel}>
+          <ThemedText type="default">Auto-sync frequency</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {intervalMinutes > 0
+              ? `Every ${intervalMinutes} minutes while the app is open`
+              : 'Only when you edit or open the app'}
+          </ThemedText>
+        </View>
+      </View>
+      <View style={styles.frequencyRow}>
+        {SYNC_INTERVAL_OPTIONS.map((option) => (
+          <Chip
+            key={option.minutes}
+            label={option.label}
+            selected={intervalMinutes === option.minutes}
+            onPress={() => setIntervalMinutes(option.minutes)}
+            style={styles.frequencyChip}
+          />
+        ))}
       </View>
 
       <View style={styles.row}>
@@ -1059,6 +1118,14 @@ const styles = StyleSheet.create({
   },
   rowLabel: {
     flex: 1,
+  },
+  frequencyRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  frequencyChip: {
+    flexGrow: 1,
   },
   icon: {
     width: 40,

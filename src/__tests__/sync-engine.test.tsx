@@ -105,6 +105,8 @@ jest.mock('@/db/sync/meta', () => ({
   getMeta: jest.fn().mockResolvedValue(null),
   setMeta: jest.fn().mockResolvedValue(undefined),
   getAutoSync: jest.fn().mockResolvedValue(true),
+  getWifiOnlySync: jest.fn().mockResolvedValue(false),
+  getSyncIntervalMinutes: jest.fn().mockResolvedValue(0),
 }));
 
 jest.mock('@/services/sync/realtime', () => ({
@@ -127,7 +129,18 @@ jest.mock('@/db/sync/device-repo', () => ({
 }));
 
 jest.mock('expo-network', () => ({
-  getNetworkStateAsync: jest.fn().mockResolvedValue({ isConnected: true, isInternetReachable: true, type: 'wifi' }),
+  // Runtime enum values are the uppercase strings below (NetworkStateType.WIFI).
+  NetworkStateType: {
+    NONE: 'NONE',
+    UNKNOWN: 'UNKNOWN',
+    CELLULAR: 'CELLULAR',
+    WIFI: 'WIFI',
+    BLUETOOTH: 'BLUETOOTH',
+    ETHERNET: 'ETHERNET',
+    WIMAX: 'WIMAX',
+    OTHER: 'OTHER',
+  },
+  getNetworkStateAsync: jest.fn().mockResolvedValue({ isConnected: true, isInternetReachable: true, type: 'WIFI' }),
 }));
 
 jest.mock('@/db/database', () => ({
@@ -142,8 +155,9 @@ describe('Sync Engine', () => {
   let appMeta: { fetchAppMeta: jest.Mock; versionSatisfies: jest.Mock };
   let auth: { getCurrentSession: jest.Mock };
   let queueRepo: { countPending: jest.Mock; clearQueue: jest.Mock; purgeParked: jest.Mock };
-  let meta: { getMeta: jest.Mock; setMeta: jest.Mock };
+  let meta: { getMeta: jest.Mock; setMeta: jest.Mock; getWifiOnlySync: jest.Mock; getSyncIntervalMinutes: jest.Mock };
   let realtime: { startRealtime: jest.Mock; stopRealtime: jest.Mock };
+  let network: { getNetworkStateAsync: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -159,11 +173,19 @@ describe('Sync Engine', () => {
     queueRepo = require('@/db/sync/queue-repo');
     meta = require('@/db/sync/meta');
     realtime = require('@/services/sync/realtime');
+    network = require('expo-network');
   });
 
   afterEach(() => {
     jest.useRealTimers();
   });
+
+  /** Flush enough microtask turns for the async runSync to reach its gates. */
+  const flushAsyncRuns = async () => {
+    for (let i = 0; i < 8; i += 1) {
+      await Promise.resolve();
+    }
+  };
 
   describe('initSyncState', () => {
     it('sets status to unconfigured when sync not configured', async () => {
@@ -232,6 +254,84 @@ describe('Sync Engine', () => {
 
       const result = await sync.syncNow();
       expect(result).toBeNull();
+    });
+  });
+
+  describe('Wi-Fi-only gate', () => {
+    const cellular = { isConnected: true, isInternetReachable: true, type: 'CELLULAR' };
+
+    it('skips the auto-sync run on cellular when Wi-Fi-only is on', async () => {
+      const push = require('@/db/sync/push');
+      await sync.initSyncState(); // fresh module → 'idle'
+      meta.getWifiOnlySync.mockResolvedValue(true);
+      network.getNetworkStateAsync.mockResolvedValue(cellular);
+
+      // Fire the debounced auto-sync path (source 'auto').
+      sync.scheduleSync();
+      jest.advanceTimersByTime(2000);
+      await flushAsyncRuns();
+
+      // Gated before push — the run returned early without uploading.
+      expect(push.pushPendingChanges).not.toHaveBeenCalled();
+      expect(sync.getSyncStatus()).toBe('idle');
+    });
+
+    it('does not apply the gate to manual Sync Now', async () => {
+      meta.getWifiOnlySync.mockResolvedValueOnce(true);
+      network.getNetworkStateAsync.mockResolvedValueOnce(cellular);
+
+      const result = await sync.syncNow();
+      expect(result).toEqual({
+        pushed: 1,
+        deleted: 0,
+        pulled: 0,
+        inserted: 0,
+        updated: 0,
+        failed: 0,
+        conflicts: 0,
+      });
+    });
+
+    it('still auto-syncs on cellular when Wi-Fi-only is off', async () => {
+      const push = require('@/db/sync/push');
+      meta.getWifiOnlySync.mockResolvedValue(false);
+      network.getNetworkStateAsync.mockResolvedValue(cellular);
+
+      sync.scheduleSync();
+      jest.advanceTimersByTime(2000);
+      await flushAsyncRuns();
+
+      expect(push.pushPendingChanges).toHaveBeenCalled();
+    });
+  });
+
+  describe('armPeriodicSync', () => {
+    it('arms an interval when minutes are stored', async () => {
+      meta.getSyncIntervalMinutes.mockResolvedValueOnce(30);
+
+      await sync.armPeriodicSync();
+      expect(jest.getTimerCount()).toBe(1);
+      // Firing the interval triggers an auto-sync run.
+      jest.advanceTimersByTime(30 * 60_000);
+      await flushAsyncRuns();
+      expect(network.getNetworkStateAsync).toHaveBeenCalled();
+    });
+
+    it('arms nothing when minutes are zero', async () => {
+      meta.getSyncIntervalMinutes.mockResolvedValueOnce(0);
+
+      await sync.armPeriodicSync();
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('re-arms from a stored value, replacing a previous interval', async () => {
+      meta.getSyncIntervalMinutes.mockResolvedValueOnce(30);
+      await sync.armPeriodicSync();
+      expect(jest.getTimerCount()).toBe(1);
+
+      meta.getSyncIntervalMinutes.mockResolvedValueOnce(0);
+      await sync.armPeriodicSync();
+      expect(jest.getTimerCount()).toBe(0);
     });
   });
 

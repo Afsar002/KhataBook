@@ -7,8 +7,16 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { getAutoSync, setAutoSync as persistAutoSync } from '@/db/sync/meta';
 import {
+  getAutoSync,
+  getSyncIntervalMinutes,
+  getWifiOnlySync,
+  setAutoSync as persistAutoSync,
+  setSyncIntervalMinutes as persistSyncIntervalMinutes,
+  setWifiOnlySync as persistWifiOnlySync,
+} from '@/db/sync/meta';
+import {
+  armPeriodicSync,
   getLastResult,
   getLastSyncAt,
   getSyncStatus,
@@ -34,6 +42,12 @@ interface SyncContextValue {
   /** Whether local edits auto-upload (off by default only if the user turns it off). */
   autoSync: boolean;
   setAutoSync: (value: boolean) => void;
+  /** Defer auto-sync until the device is on Wi-Fi. */
+  wifiOnly: boolean;
+  setWifiOnly: (value: boolean) => void;
+  /** Periodic auto-sync interval in minutes; 0 = off. */
+  intervalMinutes: number;
+  setIntervalMinutes: (value: number) => void;
   /** Manual "Sync Now". */
   runNow: () => Promise<void>;
 }
@@ -47,6 +61,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [syncing, setSyncing] = useState(isSyncing());
   const [realtimeMode, setRealtimeMode] = useState<RealtimeMode>(getRealtimeMode());
   const [autoSync, setAutoSyncState] = useState(true);
+  const [wifiOnly, setWifiOnlyState] = useState(false);
+  const [intervalMinutes, setIntervalMinutesState] = useState(0);
 
   useEffect(() => {
     void initSyncState(getSupabaseClient).then(() => {
@@ -55,6 +71,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       setLastResult(getLastResult());
     });
     void getAutoSync().then(setAutoSyncState);
+    void getWifiOnlySync().then(setWifiOnlyState);
+    void getSyncIntervalMinutes().then((minutes) => {
+      setIntervalMinutesState(minutes);
+      void armPeriodicSync();
+    });
 
     const unsubscribe = onStatusChange((nextStatus, nextLastSyncAt) => {
       setStatus(nextStatus);
@@ -76,13 +97,50 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     void persistAutoSync(value);
   }, []);
 
+  const setWifiOnly = useCallback((value: boolean) => {
+    setWifiOnlyState(value);
+    void persistWifiOnlySync(value);
+  }, []);
+
+  const setIntervalMinutes = useCallback((value: number) => {
+    const minutes = Math.max(0, Math.floor(value));
+    setIntervalMinutesState(minutes);
+    void persistSyncIntervalMinutes(minutes).then(() => void armPeriodicSync());
+  }, []);
+
   const runNow = useCallback(async () => {
     await syncNow(getSupabaseClient);
   }, []);
 
   const value = useMemo(
-    () => ({ status, lastSyncAt, lastResult, syncing, realtimeMode, autoSync, setAutoSync, runNow }),
-    [status, lastSyncAt, lastResult, syncing, realtimeMode, autoSync, setAutoSync, runNow]
+    () => ({
+      status,
+      lastSyncAt,
+      lastResult,
+      syncing,
+      realtimeMode,
+      autoSync,
+      setAutoSync,
+      wifiOnly,
+      setWifiOnly,
+      intervalMinutes,
+      setIntervalMinutes,
+      runNow,
+    }),
+    [
+      status,
+      lastSyncAt,
+      lastResult,
+      syncing,
+      realtimeMode,
+      autoSync,
+      setAutoSync,
+      wifiOnly,
+      setWifiOnly,
+      intervalMinutes,
+      setIntervalMinutes,
+      runNow,
+    ]
   );
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;

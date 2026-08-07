@@ -22,6 +22,8 @@ import {
   CURRENT_USER_KEY,
   getAutoSync,
   getMeta,
+  getSyncIntervalMinutes,
+  getWifiOnlySync,
   LAST_SYNC_KEY,
   LAST_SUCCESS_KEY,
   setMeta,
@@ -62,6 +64,7 @@ let lastSyncAt: string | null = null;
 let running = false;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let periodicTimer: ReturnType<typeof setInterval> | null = null;
 let retryAttempts = 0;
 let lastResult: SyncSummary | null = null;
 
@@ -192,6 +195,17 @@ async function runSync(
   if (source === 'auto' && !(await getAutoSync())) {
     return null; // auto-sync disabled; manual Sync Now still works
   }
+  // Wi-Fi-only gate — auto-sync defers on cellular (before the run "starts" so
+  // status is untouched); manual "Sync Now" always runs.
+  if (source === 'auto' && (await getWifiOnlySync())) {
+    const network = await Network.getNetworkStateAsync();
+    if (
+      network.type !== Network.NetworkStateType.WIFI &&
+      network.type !== Network.NetworkStateType.UNKNOWN
+    ) {
+      return null;
+    }
+  }
 
   running = true;
   setStatus('syncing');
@@ -283,6 +297,30 @@ function scheduleRetry(): void {
     retryTimer = null;
     void runSync('auto', getSupabaseClient);
   }, delay);
+}
+
+/**
+ * Periodic background sync. Reads the persisted interval from sync_meta and
+ * re-arms a timer; a stored 0 (or a read failure) leaves it off. Never fires
+ * while a run is in flight — runSync is re-entrant-safe on `running`.
+ */
+export async function armPeriodicSync(): Promise<void> {
+  if (periodicTimer) {
+    clearInterval(periodicTimer);
+    periodicTimer = null;
+  }
+  let minutes = 0;
+  try {
+    minutes = await getSyncIntervalMinutes();
+  } catch {
+    minutes = 0;
+  }
+  if (minutes <= 0) {
+    return;
+  }
+  periodicTimer = setInterval(() => {
+    void runSync('auto', getSupabaseClient);
+  }, minutes * 60_000);
 }
 
 /** Called on sign-in / sign-out so the status reflects the session again. */
