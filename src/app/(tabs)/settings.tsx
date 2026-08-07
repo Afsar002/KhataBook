@@ -41,6 +41,7 @@ import { useSync } from '@/context/sync-context';
 import { buildBackupJSON, parseBackup, restoreBackup } from '@/db/backup';
 import { setSetting } from '@/db/settings';
 import { wipeDatabase } from '@/db/database';
+import { countUnresolvedConflicts } from '@/db/sync/conflict-repo';
 import { listSyncEvents } from '@/db/sync/history-repo';
 import { listSyncedDevices } from '@/db/sync/device-repo';
 import { countFailed, countPending, retryAll } from '@/db/sync/queue-repo';
@@ -137,6 +138,7 @@ function CloudSyncCard() {
   const [deviceSaved, setDeviceSaved] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
+  const [conflictCount, setConflictCount] = useState(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyEvents, setHistoryEvents] = useState<SyncHistoryEntry[]>([]);
   const [devicesOpen, setDevicesOpen] = useState(false);
@@ -147,10 +149,13 @@ function CloudSyncCard() {
 
   /** Reload the queue badge counts (pending + parked) from SQLite. */
   const refreshQueue = useCallback(() => {
-    void Promise.all([countPending(), countFailed()]).then(([pending, failed]) => {
-      setPendingCount(pending);
-      setFailedCount(failed);
-    });
+    void Promise.all([countPending(), countFailed(), countUnresolvedConflicts()]).then(
+      ([pending, failed, conflicts]) => {
+        setPendingCount(pending);
+        setFailedCount(failed);
+        setConflictCount(conflicts);
+      }
+    );
   }, []);
 
   // Refresh on mount and whenever a sync run finishes (syncing flips back).
@@ -292,6 +297,25 @@ function CloudSyncCard() {
           </ThemedText>
         </View>
       ) : null}
+
+      <Pressable
+        onPress={() => {
+          impact('light');
+          router.push('/conflicts');
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Review sync conflicts"
+        style={styles.row}>
+        <View style={styles.rowLabel}>
+          <ThemedText type="default">Conflicts</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {conflictCount === 0
+              ? 'No unsynced changes were overwritten'
+              : `${conflictCount} local ${conflictCount === 1 ? 'change was' : 'changes were'} overwritten — review & restore`}
+          </ThemedText>
+        </View>
+        <ChevronRight size={18} color={theme.textSecondary} />
+      </Pressable>
 
       <LargeButton
         title="Sync Now"

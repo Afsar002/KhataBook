@@ -252,6 +252,25 @@ export interface SyncHistoryEntry {
   createdAt: string;
 }
 
+/**
+ * A captured sync conflict: a newer cloud row overwrote a local change that
+ * hadn't uploaded yet. Both sides are snapshotted so the user can review and,
+ * if they prefer, restore their own version. Local-only, never synced.
+ */
+export interface SyncConflict {
+  id: number;
+  tableName: string;
+  recordUuid: string;
+  message: string;
+  /** JSON snapshot of the local row at conflict time (null for tombstone conflicts). */
+  localJson: string | null;
+  /** JSON snapshot of the remote row at conflict time (null for tombstone conflicts). */
+  remoteJson: string | null;
+  resolved: boolean;
+  createdAt: string;
+}
+
+
 /** A device that has successfully synced. */
 export interface SyncDevice {
   id: number;

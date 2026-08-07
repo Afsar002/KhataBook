@@ -7,13 +7,14 @@
  * Remote tombstones (`deleted_at` set) hard-delete the local row. Parents are
  * pulled before children so cloud foreign keys always resolve locally.
  */
-import type { SQLiteBindValue, SQLiteDatabase } from 'expo-sqlite';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { getDatabase } from '@/db/database';
+import { addConflictRecord } from '@/db/sync/conflict-repo';
 import { addSyncEvent } from '@/db/sync/history-repo';
 import { cursorKey, getMeta, setMeta } from '@/db/sync/meta';
 import { listPendingChanges } from '@/db/sync/queue-repo';
+import { deleteLocalRow, insertLocalRow, updateLocalRow } from '@/db/sync/rows';
 import {
   loadUuidToIdMap,
   specFor,
@@ -134,13 +135,10 @@ export async function pullRemoteChanges(
         lastUpdatedAt = remoteUpdatedAt;
       }
 
-      // settings uses `key` as its local primary key; every other table uses `id`.
-      const local = await db.getFirstAsync<{
-        id?: number;
-        key?: string;
-        updated_at: string | null;
-      }>(
-        `SELECT ${spec.table === 'settings' ? 'key' : 'id'}, updated_at FROM ${table} WHERE uuid = ?`,
+      // Fetch the full row so a conflict can snapshot the local version instead
+      // of silently discarding it.
+      const local = await db.getFirstAsync<Record<string, unknown> | null>(
+        `SELECT * FROM ${table} WHERE uuid = ?`,
         String(remote.id)
       );
 
@@ -153,19 +151,24 @@ export async function pullRemoteChanges(
             const queuedKey = `${table}:${String(remote.id)}`;
             if (queuedKeys.has(queuedKey)) {
               result.conflicts += 1;
-              await addSyncEvent(
-                'conflict',
-                `A ${labelFor(table)} deleted on another device removed an unsynced local change.`
-              );
+              const message = `A ${labelFor(table)} deleted on another device removed an unsynced local change.`;
+              await addSyncEvent('conflict', message);
+              await addConflictRecord({
+                tableName: table,
+                recordUuid: String(remote.id),
+                message,
+                localJson: JSON.stringify(local),
+                remoteJson: null,
+              });
             }
-            await deleteLocalRow(db, spec, localKey);
+            await deleteLocalRow(db, spec, localKey as string | number);
             result.deleted += 1;
           }
         }
         continue;
       }
 
-      const localUpdatedAt = local?.updated_at ?? null;
+      const localUpdatedAt = (local?.updated_at as string | null) ?? null;
       // Last-write-wins: only apply when the remote row is newer.
       if (local && localUpdatedAt && localUpdatedAt >= remoteUpdatedAt) {
         result.skipped += 1;
@@ -182,10 +185,15 @@ export async function pullRemoteChanges(
         const queuedKey = `${table}:${String(remote.id)}`;
         if (queuedKeys.has(queuedKey)) {
           result.conflicts += 1;
-          await addSyncEvent(
-            'conflict',
-            `A newer ${labelFor(table)} from the cloud replaced an unsynced local change.`
-          );
+          const message = `A newer ${labelFor(table)} from the cloud replaced an unsynced local change.`;
+          await addSyncEvent('conflict', message);
+          await addConflictRecord({
+            tableName: table,
+            recordUuid: String(remote.id),
+            message,
+            localJson: JSON.stringify(local),
+            remoteJson: JSON.stringify(remote),
+          });
         }
         await updateLocalRow(db, spec, localRow);
         result.updated += 1;
@@ -204,62 +212,3 @@ export async function pullRemoteChanges(
   return result;
 }
 
-function dataColumns(spec: SyncTableSpec): string[] {
-  return spec.table === 'settings' ? ['key', ...spec.columns] : spec.columns;
-}
-
-/** Column values coerced to SQLite-safe types (dates from Postgres → ISO). */
-function bindValue(value: unknown): SQLiteBindValue {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (typeof value === 'object' || Array.isArray(value)) {
-    return JSON.stringify(value);
-  }
-  return value as SQLiteBindValue;
-}
-
-async function insertLocalRow(
-  db: SQLiteDatabase,
-  spec: SyncTableSpec,
-  row: Record<string, unknown>
-): Promise<void> {
-  const columns = [...dataColumns(spec), 'uuid', 'user_id', 'updated_at', 'deleted_at', 'version'];
-  const placeholders = columns.map(() => '?').join(', ');
-  const values = columns.map((column) => bindValue(row[column]));
-  await db.runAsync(
-    `INSERT INTO ${spec.table} (${columns.join(', ')}) VALUES (${placeholders})`,
-    ...values
-  );
-}
-
-async function updateLocalRow(
-  db: SQLiteDatabase,
-  spec: SyncTableSpec,
-  row: Record<string, unknown>
-): Promise<void> {
-  const columns = [...dataColumns(spec), 'user_id', 'updated_at', 'deleted_at', 'version'];
-  const sets = columns.map((column) => `${column} = ?`).join(', ');
-  const values = columns.map((column) => bindValue(row[column]));
-  await db.runAsync(
-    `UPDATE ${spec.table} SET ${sets} WHERE uuid = ?`,
-    ...values,
-    String(row.uuid)
-  );
-}
-
-async function deleteLocalRow(
-  db: SQLiteDatabase,
-  spec: SyncTableSpec,
-  localId: string | number
-): Promise<void> {
-  if (spec.table === 'parties') {
-    // Mirrors the app-level party delete: children go first.
-    await db.runAsync('DELETE FROM party_transactions WHERE party_id = ?', localId);
-  }
-  const keyColumn = spec.table === 'settings' ? 'key' : 'id';
-  await db.runAsync(`DELETE FROM ${spec.table} WHERE ${keyColumn} = ?`, localId);
-}

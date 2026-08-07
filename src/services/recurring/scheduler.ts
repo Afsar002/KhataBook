@@ -11,6 +11,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import {
   listActiveRecurringTemplatesForDate,
+  listRecurringTemplates,
   updateLastGeneratedDate,
 } from '@/db/recurring-repo';
 import { addTransaction } from '@/db/transaction-repo';
@@ -141,7 +142,6 @@ export async function catchUpMissedEntries(): Promise<GeneratedEntry[]> {
   const allResults: GeneratedEntry[] = [];
 
   // Get all active templates to find the earliest start date
-  const { listRecurringTemplates } = await import('@/db/recurring-repo');
   const templates = await listRecurringTemplates(true);
 
   if (templates.length === 0) {

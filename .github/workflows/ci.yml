@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, lint, test, export
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        # --include=dev: the repo's env prunes devDependencies by default
+        # (see memory: npm-dev-deps-prune); keep them here so tsc/jest/lint run.
+        run: npm ci --include=dev
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test -- --ci
+
+      - name: Bundle check (web export)
+        # Builds the JS bundle; catches import/resolve errors that typecheck misses.
+        run: npx expo export --platform web

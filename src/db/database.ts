@@ -244,6 +244,19 @@ const SCHEMA_TABLES = `
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Captured LWW conflicts: snapshots of both sides so the user can review
+  -- and restore an overwritten local change. Device-local, never synced.
+  CREATE TABLE IF NOT EXISTS sync_conflicts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    record_uuid TEXT NOT NULL,
+    message TEXT NOT NULL,
+    local_json TEXT,
+    remote_json TEXT,
+    resolved INTEGER NOT NULL DEFAULT 0 CHECK (resolved IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Per-device name list: tracks every device that has successfully synced.
   -- Device-local, never synced. The sync engine stamps the device name into
   -- the synced 'last_sync_from' setting after a successful push, and records
@@ -318,6 +331,9 @@ export const nowIso = (): string => new Date().toISOString();
  *   Adds `kind` to `transactions` and `party_transactions`, then backfills
  *   an immutable "Opening Balance" entry for every account/party that has a
  *   non-zero `opening_balance` but no corresponding ledger entry yet.
+ * v9 (2026-08-07): `sync_conflicts` table snapshotting the local + remote
+ *   sides of every LWW conflict so the Conflicts screen can review and restore
+ *   overwritten local changes instead of losing them silently.
  */
 async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
   const versionRow = await database.getFirstAsync<{ user_version: number }>(
@@ -350,6 +366,9 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
     }
     if (current < 8) {
       await migrateV8(database);
+    }
+    if (current < 9) {
+      await migrateV9(database);
     }
   });
 }
@@ -696,6 +715,30 @@ async function migrateV8(database: SQLite.SQLiteDatabase): Promise<void> {
   }
 
   await database.runAsync('PRAGMA user_version = 8');
+}
+
+/**
+ * v9: local `sync_conflicts` table.
+ *
+ * Snapshots both sides of every last-write-wins conflict so the Conflicts
+ * screen can review them and optionally restore the overwritten local version.
+ * Device-local, never synced — mirrors `sync_history`.
+ */
+async function migrateV9(database: SQLite.SQLiteDatabase): Promise<void> {
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS sync_conflicts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_name TEXT NOT NULL,
+      record_uuid TEXT NOT NULL,
+      message TEXT NOT NULL,
+      local_json TEXT,
+      remote_json TEXT,
+      resolved INTEGER NOT NULL DEFAULT 0 CHECK (resolved IN (0, 1)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_conflicts_open ON sync_conflicts(resolved, created_at);
+  `);
+  await database.runAsync('PRAGMA user_version = 9');
 }
 
 export async function initDatabase(): Promise<void> {
