@@ -1,0 +1,144 @@
+/**
+ * Party repo tests: add/update carry the opening-balance column, and every
+ * balance query derives the total from the party_transactions ledger.
+ */
+import {
+  addParty,
+  addPartyTransaction,
+  getParty,
+  getPartyBalance,
+  listParties,
+  updateParty,
+} from '@/db/party-repo';
+
+const mockDb = {
+  getAllAsync: jest.fn().mockResolvedValue([]),
+  getFirstAsync: jest.fn(),
+  runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
+  withTransactionAsync: jest.fn((cb: () => Promise<unknown> | unknown) => Promise.resolve(cb())),
+};
+
+jest.mock('@/db/database', () => ({
+  getDatabase: jest.fn(),
+  nowIso: jest.fn(() => '2026-01-01T00:00:00.000Z'),
+}));
+
+jest.mock('@/db/sync/queue-repo', () => ({
+  enqueueChange: jest.fn(),
+}));
+
+jest.mock('@/services/supabase/auth', () => ({
+  getCurrentUserId: jest.fn().mockReturnValue('user-id'),
+}));
+
+describe('Party repo — opening balances', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    const { getDatabase } = require('@/db/database');
+    getDatabase.mockReturnValue(mockDb);
+  });
+
+  it('adds a party with its opening balance and enqueues an insert', async () => {
+    const id = await addParty({
+      name: 'Ramesh Store',
+      type: 'customer',
+      phone: '9876543210',
+      openingBalance: 2500,
+    });
+
+    expect(id).toBe(1);
+    const insert = mockDb.runAsync.mock.calls[0];
+    expect(insert[0]).toContain('INSERT INTO parties');
+    expect(insert[0]).toContain('opening_balance');
+    expect(insert[4]).toBe('Ramesh Store');
+    expect(insert[7]).toBe(2500);
+    const { enqueueChange } = require('@/db/sync/queue-repo');
+    expect(enqueueChange).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        table: 'parties',
+        operation: 'insert',
+        payload: expect.objectContaining({ opening_balance: 2500 }),
+      })
+    );
+  });
+
+  it('defaults opening balance to 0 when omitted', async () => {
+    await addParty({ name: 'Sharma Traders', type: 'supplier', phone: '' });
+
+    const insert = mockDb.runAsync.mock.calls[0];
+    expect(insert[7]).toBe(0);
+  });
+
+  it('updates name, phone and opening balance and enqueues an update', async () => {
+    mockDb.getFirstAsync.mockResolvedValue({ uuid: 'party-uuid' });
+
+    await updateParty(3, { name: 'New Name', phone: '123', openingBalance: 500 });
+
+    const update = mockDb.runAsync.mock.calls[0];
+    expect(update[0]).toContain('UPDATE parties SET name');
+    expect(update[0]).toContain('opening_balance');
+    expect(update[1]).toBe('New Name');
+    expect(update[3]).toBe(500);
+    const { enqueueChange } = require('@/db/sync/queue-repo');
+    expect(enqueueChange).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        table: 'parties',
+        operation: 'update',
+        recordUuid: 'party-uuid',
+        payload: expect.objectContaining({ opening_balance: 500 }),
+      })
+    );
+  });
+
+  it('getParty selects the opening balance alias', async () => {
+    mockDb.getFirstAsync.mockResolvedValue({
+      id: 1,
+      name: 'Ramesh',
+      type: 'customer',
+      phone: '',
+      openingBalance: 100,
+    });
+
+    const party = await getParty(1);
+
+    expect(party?.openingBalance).toBe(100);
+    expect(mockDb.getFirstAsync.mock.calls[0][0]).toContain(
+      'opening_balance AS openingBalance'
+    );
+  });
+
+  it('balance queries derive the total from the party_transactions ledger', async () => {
+    mockDb.getFirstAsync.mockResolvedValue(null);
+    mockDb.getAllAsync.mockResolvedValue([]);
+
+    await getPartyBalance(1);
+    await listParties('customer');
+
+    const balanceSql = [
+      mockDb.getFirstAsync.mock.calls[0][0],
+      mockDb.getAllAsync.mock.calls[0][0],
+    ].join('\n');
+    expect(balanceSql).toContain('p.opening_balance AS openingBalance');
+    // The balance is the signed sum of the ledger (opening balance is the
+    // first ledger entry), not a separate opening_balance addition.
+    expect(balanceSql).toContain('LEFT JOIN party_transactions pt ON pt.party_id = p.id');
+    expect(balanceSql).toContain('COALESCE(');
+    expect(balanceSql).toContain('SUM(');
+  });
+
+  it('adds a party transaction (unchanged shape) and enqueues an insert', async () => {
+    await addPartyTransaction({
+      partyId: 1,
+      direction: 'out',
+      amount: 500,
+      note: '',
+      date: '2026-01-05',
+    });
+
+    const insert = mockDb.runAsync.mock.calls[0];
+    expect(insert[0]).toContain('INSERT INTO party_transactions');
+    expect(insert[4]).toBe(1);
+  });
+});

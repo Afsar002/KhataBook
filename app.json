@@ -1,16 +1,18 @@
 {
   "expo": {
-    "name": "papa-temp",
-    "slug": "papa-temp",
-    "version": "1.0.0",
+    "name": "DailyKhata",
+    "slug": "dailykhata",
+    "version": "1.12.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "papatemp",
+    "scheme": "dailykhata",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "bundleIdentifier": "com.dailykhata.app",
       "icon": "./assets/expo.icon"
     },
     "android": {
+      "package": "com.dailykhata.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -28,11 +30,20 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#16A34A",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      "expo-sqlite",
+      "expo-sharing",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow DailyKhata to use Face ID to unlock the app."
+        }
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,
