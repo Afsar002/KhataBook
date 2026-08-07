@@ -25,10 +25,15 @@ local SQLite database.
 - **Data-Migration Prompts** — restoring an old backup shows a server-managed
   notice explaining what changed.
 - **Export** — transactions & khata ledgers as CSV (Excel), monthly reports as PDF
-- **Unlock Protection** — optional fingerprint / face / PIN lock on app open
-  (device-local, never synced)
+- **Recurring transactions** — set up income, expense or khata entries on a daily /
+  weekly / monthly schedule (Settings → Recurring)
+- **Fast full-text search** — SQLite FTS5 index over notes, categories, accounts,
+  parties and amounts, with relevance ranking
+- **Responsive layout** — bottom tabs on phones; a left sidebar replaces them on
+  tablets and desktop windows
 - **Settings** — dark mode toggle, Cloud Sync (Connected Account / Last Sync /
-  Sync Now / Auto Sync / Sign Out), backup & export under Advanced
+  Sync Now / Wi-Fi-only / periodic auto-sync / Sign Out), conflict review,
+  backup & export under Advanced
 - **Design system** — Inter font, Lucide icons, green = income, red = expense, 16px buttons, 8px spacing
 
 ## Getting started

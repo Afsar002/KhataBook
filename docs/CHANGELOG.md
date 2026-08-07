@@ -1,3 +1,58 @@
+Audit round (2026-08-07) — reliability, security & desktop support
+
+Closed the audit's open items. Highlights:
+
+**Search & performance**
+- **Global search is now SQLite FTS5**: a full-text index (`ledger_fts`) over
+  transaction/transfer notes, account & category names, amounts, party name/phone
+  and account names. Trigram tokenizer gives substring matching with relevance
+  ranking (`ORDER BY rank`); maintained by triggers so local and cloud-sync
+  writes stay indexed. Falls back to the LIKE scan on SQLite builds without FTS5,
+  so search can never break a database that can't host the index.
+- **Party ledger pagination**: the khata detail screen now loads 50 rows at a
+  time with keyset (cursor) pagination, matching the account/history feeds
+  instead of pulling every entry at once.
+- **List virtualization**: `initialNumToRender` / `maxToRenderPerBatch` /
+  `windowSize` tuned on the long History/Khata lists.
+- **PDF export crash fixed**: WinAnsi character crashes (U+202F / U+00A0 in notes)
+  normalized before text drawing.
+
+**Web / tablet**
+- **Responsive layout**: windows ≥900px wide swap the bottom tab bar for a fixed
+  left navigation rail (icon + label, active highlight, hover states); the
+  content column widens to 960px once the sidebar is present. Phones keep the
+  existing bottom tabs untouched.
+
+**Security**
+- **Local audit log**: sensitive mutations (account/party create/rename/delete,
+  backup/restore/wipe) write an append-only row to `audit_log` — device-local,
+  never synced. See docs/16-security.md.
+- **Key rotation + secret scanning docs** and a CI secret scan step so Supabase
+  keys can be rotated safely (docs/13-supabase-setup.md).
+
+**Sync**
+- **Conflict review UI**: pending sync conflicts are listed with per-item review
+  in Settings instead of just a count.
+- **Sync scheduling settings**: Wi-Fi-only sync and periodic auto-sync intervals
+  (Settings → Cloud Sync).
+- **Live vs trigger mode indicator**: the sync status banner now says whether
+  realtime ("live") or trigger-based ("trigger") sync is active, and the offline
+  banner appears when disconnected.
+
+**Quality / UX**
+- **CI workflow**: GitHub Actions runs lint, typecheck and the Jest suite on every
+  push (`.github/workflows/ci.yml`); e2e harness scaffolded.
+- **Recurring transactions verified end-to-end**: create / edit / toggle / delete
+  covered, with the missing create/edit screens wired in.
+- **Backdating**: entry forms got a date picker so income/expense/khata/transfer
+  entries can be recorded for a past date.
+- **Keyboard avoidance**: shared `Screen` wrapper keeps forms clear of the
+  Android keyboard.
+- **Extracted `ScreenHeader`**: one header component with standardized back
+  buttons across detail screens.
+- **EmptyState semantic icons**: each empty state maps to a meaningful icon
+  instead of a generic one.
+
 Maintenance (2026-08-06) — dead-code removal
 
 Removed features that were never finished or were already rolled back:

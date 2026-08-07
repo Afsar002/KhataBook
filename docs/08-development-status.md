@@ -73,6 +73,24 @@
     returns `migrationNotice` to the caller; Settings shows it in the restore
     confirmation alert
 
+## Completed (Audit round 2026-08-07)
+
+- ✓ Backdating: date picker in every entry form (income/expense/khata/transfer)
+- ✓ Keyboard avoidance on shared `Screen` wrapper (Android)
+- ✓ Offline / sync-status banner component at the root layout
+- ✓ Realtime fallback UX — banner distinguishes "live" (Realtime) vs "trigger" mode
+- ✓ EmptyState semantic icon mapping (`EmptyStateType`)
+- ✓ Shared `ScreenHeader` component; standardized back buttons
+- ✓ Conflict review UI — per-item review in Settings, not just a count
+- ✓ Recurring transactions verified end-to-end (create/edit screens wired up)
+- ✓ Performance: party ledger keyset pagination + list virtualization props
+- ✓ Search: SQLite FTS5 full-text index with LIKE fallback (see CHANGELOG)
+- ✓ Web/tablet responsive layout — left sidebar ≥900px, wider content column
+- ✓ CI workflow (lint + typecheck + Jest) + e2e harness scaffold
+- ✓ Security: local append-only `audit_log` + key-rotation & secret-scan docs
+- ✓ Selective sync: Wi-Fi-only + periodic auto-sync scheduling settings
+- ✓ PDF export WinAnsi crash fix
+
 ## Removed
 
 - Local Unlock Protection (v1.11) was never wired in — removed in the
