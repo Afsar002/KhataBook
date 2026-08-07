@@ -2,6 +2,7 @@
 import type { Href } from 'expo-router';
 
 import { getDatabase, nowIso } from '@/db/database';
+import { ftsMatchQuery, isFtsEnabled, searchFeedIdsByFts } from '@/db/search-index';
 import { enqueueChange } from '@/db/sync/queue-repo';
 import { getCurrentUserId } from '@/services/supabase/auth';
 import type {
@@ -321,8 +322,9 @@ function pageResult(rows: LedgerRow[]): LedgerPage {
 
 /**
  * Search the combined feed (transactions + transfers) by note, category,
- * account name or amount. Matching happens in SQLite (`LIKE`) so only the
- * matching rows are loaded into JS. Returns rows newest first.
+ * account name or amount. When the FTS5 index is available this runs an
+ * indexed FTS query and joins the matching ids back to the feed; otherwise it
+ * falls back to a `LIKE` scan. Returns rows newest first.
  */
 export async function searchLedger(query: string, limit = SEARCH_LIMIT): Promise<LedgerRow[]> {
   const db = getDatabase();
@@ -330,6 +332,47 @@ export async function searchLedger(query: string, limit = SEARCH_LIMIT): Promise
   if (!q) {
     return [];
   }
+  if (isFtsEnabled()) {
+    const match = ftsMatchQuery(q);
+    if (match) {
+      return searchLedgerByFts(db, match, limit);
+    }
+    // Query has no token ≥3 chars, which the trigram tokenizer can't index —
+    // fall through to LIKE, which also covers 1–2 char amounts.
+  }
+  return searchLedgerByLike(db, q, limit);
+}
+
+/** FTS-backed search: match ids in the index, then load those feed rows. */
+async function searchLedgerByFts(
+  db: ReturnType<typeof getDatabase>,
+  match: string,
+  limit: number
+): Promise<LedgerRow[]> {
+  const { txIds, transferIds } = await searchFeedIdsByFts(db, match, limit);
+  if (txIds.length === 0 && transferIds.length === 0) {
+    return [];
+  }
+  const parts: string[] = [];
+  const params: (string | number)[] = [];
+  if (txIds.length > 0) {
+    parts.push(`(${LEDGER_SELECT} WHERE t.id IN (${txIds.map(() => '?').join(',')}))`);
+    params.push(...txIds);
+  }
+  if (transferIds.length > 0) {
+    parts.push(`(${TRANSFER_SELECT} WHERE tr.id IN (${transferIds.map(() => '?').join(',')}))`);
+    params.push(...transferIds);
+  }
+  const rows = await db.getAllAsync<LedgerRow>(parts.join(' UNION ALL '), ...params);
+  return rows.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id).slice(0, limit);
+}
+
+/** LIKE-backed search: substring match across the whole feed. */
+async function searchLedgerByLike(
+  db: ReturnType<typeof getDatabase>,
+  q: string,
+  limit: number
+): Promise<LedgerRow[]> {
   const like = likeParam(q);
   const params: string[] = [like, like, like, like, like];
   // A purely-numeric query also matches amounts as text, e.g. "5" → 500, 1500.5.

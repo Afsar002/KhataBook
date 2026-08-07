@@ -1,5 +1,6 @@
 /** Account queries. */
 import { getDatabase, nowIso } from '@/db/database';
+import { ACCOUNT_BASE, FTS_TABLE, ftsMatchQuery, isFtsEnabled } from '@/db/search-index';
 import { enqueueChange } from '@/db/sync/queue-repo';
 import { getCurrentUserId } from '@/services/supabase/auth';
 import type { Account, AccountBalance, AccountType } from '@/types';
@@ -83,6 +84,38 @@ export async function searchAccounts(query: string, limit = SEARCH_LIMIT): Promi
   const q = query.trim();
   if (!q) {
     return [];
+  }
+  if (isFtsEnabled()) {
+    const match = ftsMatchQuery(q);
+    if (match) {
+      const ids = await db.getAllAsync<{ rowid: number }>(
+        `SELECT rowid FROM ${FTS_TABLE}
+         WHERE ${FTS_TABLE} MATCH ? AND kind = 'account'
+         ORDER BY rank
+         LIMIT ${limit}`,
+        match
+      );
+      if (ids.length === 0) {
+        return [];
+      }
+      const placeholders = ids.map(() => '?').join(',');
+      return db.getAllAsync<AccountBalance>(
+        `
+        SELECT
+          a.id,
+          a.name,
+          a.type,
+          a.sort_order AS sortOrder,
+          a.opening_balance AS openingBalance,
+          ${BALANCE_SQL} AS balance
+        FROM accounts a
+        WHERE a.id IN (${placeholders})
+        ORDER BY a.sort_order, a.id
+        LIMIT ${limit}
+        `,
+        ...ids.map((row) => row.rowid - ACCOUNT_BASE)
+      );
+    }
   }
   const like = likeParam(q);
   return db.getAllAsync<AccountBalance>(

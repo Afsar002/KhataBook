@@ -9,6 +9,7 @@
  * All balances derive from the ledger — there is no separate addition.
  */
 import { getDatabase, nowIso } from '@/db/database';
+import { FTS_TABLE, PARTY_BASE, ftsMatchQuery, isFtsEnabled } from '@/db/search-index';
 import { enqueueChange } from '@/db/sync/queue-repo';
 import { LEDGER_PAGE_SIZE, type LedgerCursor } from '@/db/transaction-repo';
 import { getCurrentUserId } from '@/services/supabase/auth';
@@ -285,6 +286,40 @@ export async function searchParties(query: string, limit = SEARCH_LIMIT): Promis
   const q = query.trim();
   if (!q) {
     return [];
+  }
+  if (isFtsEnabled()) {
+    const match = ftsMatchQuery(q);
+    if (match) {
+      const ids = await db.getAllAsync<{ rowid: number }>(
+        `SELECT rowid FROM ${FTS_TABLE}
+         WHERE ${FTS_TABLE} MATCH ? AND kind = 'party'
+         ORDER BY rank
+         LIMIT ${limit}`,
+        match
+      );
+      if (ids.length === 0) {
+        return [];
+      }
+      const placeholders = ids.map(() => '?').join(',');
+      return db.getAllAsync<PartyBalance>(
+        `
+        SELECT
+          p.id,
+          p.name,
+          p.type,
+          p.phone,
+          p.opening_balance AS openingBalance,
+          ${PARTY_BALANCE_SQL} AS balance
+        FROM parties p
+        LEFT JOIN party_transactions pt ON pt.party_id = p.id
+        WHERE p.id IN (${placeholders})
+        GROUP BY p.id
+        ORDER BY p.name COLLATE NOCASE, p.id
+        LIMIT ${limit}
+        `,
+        ...ids.map((row) => row.rowid - PARTY_BASE)
+      );
+    }
   }
   const like = likeParam(q);
   return db.getAllAsync<PartyBalance>(

@@ -21,6 +21,7 @@
 import { File, Paths } from 'expo-file-system';
 import * as SQLite from 'expo-sqlite';
 
+import { initSearchIndex } from '@/db/search-index';
 import { isSyncConfigured } from '@/services/supabase/config';
 import { uuid } from '@/utils/uuid';
 
@@ -788,6 +789,10 @@ export async function initDatabase(): Promise<void> {
   //    (added by migrateV2), so the uuid-column indexes succeed. On a fresh
   //    install the tables already have uuid columns from SCHEMA_TABLES.
   await database.execAsync(SCHEMA_INDEXES);
+  // 4. Build the FTS5 search index (when the SQLite build supports it). This
+  //    runs after migrations because the v1/v4/v8 table rebuilds would drop
+  //    any triggers created before them. Falls back to LIKE search silently.
+  await initSearchIndex(database);
   // Offline mode seeds the default Cash/Bank accounts and categories right
   // away. In sync mode the cloud is the source of truth, so seeding is skipped
   // entirely: a returning user restores exactly their cloud data (never

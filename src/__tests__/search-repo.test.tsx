@@ -6,6 +6,7 @@
  * per-test `mockResolvedValue` calls reach the exact instance under test.
  */
 import { searchAccounts } from '@/db/account-repo';
+import { ACCOUNT_BASE, PARTY_BASE, setFtsEnabledForTests } from '@/db/search-index';
 import { searchParties } from '@/db/party-repo';
 import { searchLedger } from '@/db/transaction-repo';
 
@@ -99,6 +100,80 @@ describe('Global search repos', () => {
       const [sql, ...params] = mockDb.getAllAsync.mock.calls[0];
       expect(sql).toContain('a.name LIKE ? ESCAPE');
       expect(params).toEqual(['%SBI%']);
+    });
+  });
+
+  describe('FTS5 path (index enabled)', () => {
+    beforeEach(() => {
+      setFtsEnabledForTests(true);
+    });
+    afterAll(() => {
+      setFtsEnabledForTests(false);
+    });
+
+    it('searchLedger queries the index then loads the matching feed rows', async () => {
+      // FTS rowids come back namespaced (transfer band); the repo shifts the
+      // transfer rowid back to the real id before loading the feed rows.
+      mockDb.getAllAsync
+        .mockResolvedValueOnce([
+          { rowid: 3, kind: 'tx' },
+          { rowid: 10000001, kind: 'transfer' },
+        ])
+        .mockResolvedValueOnce([
+          { id: 3, kind: 'income', amount: 10, date: '2026-08-01' },
+          { id: 10000001, kind: 'transfer', amount: 5, date: '2026-08-02' },
+        ]);
+
+      const out = await searchLedger('canteen');
+
+      // One FTS query + one combined feed-load (UNION ALL), not one per kind.
+      expect(mockDb.getAllAsync).toHaveBeenCalledTimes(2);
+      const [ftsSql, ftsParam] = mockDb.getAllAsync.mock.calls[0];
+      expect(ftsSql).toContain('ledger_fts MATCH ?');
+      expect(ftsSql).toContain("kind IN ('tx', 'transfer')");
+      expect(ftsParam).toBe('"canteen"');
+      const combinedSql = mockDb.getAllAsync.mock.calls[1][0];
+      expect(combinedSql).toContain('FROM transactions t');
+      expect(combinedSql).toContain('FROM transfers tr');
+      expect(out).toHaveLength(2);
+    });
+
+    it('searchLedger falls back to LIKE when no token is ≥3 chars', async () => {
+      mockDb.getAllAsync.mockResolvedValue([]);
+
+      await searchLedger('ch');
+
+      expect(mockDb.getAllAsync).toHaveBeenCalledTimes(1);
+      expect(mockDb.getAllAsync.mock.calls[0][0]).toContain('LIKE ? ESCAPE');
+    });
+
+    it('searchParties queries the party index and loads matches by id', async () => {
+      mockDb.getAllAsync
+        .mockResolvedValueOnce([{ rowid: 5 + PARTY_BASE }])
+        .mockResolvedValueOnce([
+          { id: 5, name: 'Ramesh', type: 'customer', phone: '', openingBalance: 0, balance: 0 },
+        ]);
+
+      const out = await searchParties('ram');
+
+      expect(mockDb.getAllAsync).toHaveBeenCalledTimes(2);
+      expect(mockDb.getAllAsync.mock.calls[0][0]).toContain("kind = 'party'");
+      expect(mockDb.getAllAsync.mock.calls[0][1]).toBe('"ram"');
+      expect(out).toHaveLength(1);
+    });
+
+    it('searchAccounts queries the account index and loads matches by id', async () => {
+      mockDb.getAllAsync
+        .mockResolvedValueOnce([{ rowid: 2 + ACCOUNT_BASE }])
+        .mockResolvedValueOnce([
+          { id: 2, name: 'SBI', type: 'bank', sortOrder: 1, openingBalance: 0, balance: 0 },
+        ]);
+
+      const out = await searchAccounts('sbi');
+
+      expect(mockDb.getAllAsync).toHaveBeenCalledTimes(2);
+      expect(mockDb.getAllAsync.mock.calls[0][0]).toContain("kind = 'account'");
+      expect(out).toHaveLength(1);
     });
   });
 });
