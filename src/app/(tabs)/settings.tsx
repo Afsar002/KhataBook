@@ -17,6 +17,7 @@ import {
   LogOut,
   Moon,
   RefreshCw,
+  Repeat,
   Settings2,
   Smartphone,
   Tags,
@@ -1000,6 +1001,23 @@ export default function SettingsScreen() {
           <ThemedText type="default">Categories</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
             Add, edit or delete income & expense categories
+          </ThemedText>
+        </View>
+        <ChevronRight size={22} color={theme.text} />
+      </Pressable>
+
+      <Pressable
+        onPress={() => router.push('/recurring')}
+        accessibilityRole="button"
+        accessibilityLabel="Recurring transactions"
+        style={styles.row}>
+        <View style={[styles.icon, { backgroundColor: theme.backgroundElement }]}>
+          <Repeat size={22} color={theme.text} />
+        </View>
+        <View style={styles.rowLabel}>
+          <ThemedText type="default">Recurring</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            Set up income, expense or khata entries on a schedule
           </ThemedText>
         </View>
         <ChevronRight size={22} color={theme.text} />
