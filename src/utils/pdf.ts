@@ -40,6 +40,20 @@ function rupees(amount: number): string {
   return `${sign}Rs. ${grouped}`;
 }
 
+/**
+ * Replaces characters that pdf-lib's built-in WinAnsi fonts cannot encode.
+ * Android's `en-IN` locale emits U+202F (narrow no-break space) inside
+ * formatted dates, and user-entered text may contain emoji or non-Latin
+ * scripts — all of which crash `doc.save()` with "WinAnsi cannot encode …".
+ */
+function sanitize(text: string): string {
+  return text
+    .replace(/\u202F/g, ' ') // narrow no-break space (en-IN locale)
+    .replace(/\u00A0/g, ' ') // no-break space
+    .replace(/₹/g, 'Rs.') // rupee sign (defensive; rupees() already strips it)
+    .replace(/[^\x00-\xFF]/g, ''); // drop anything outside WinAnsi/Latin-1
+}
+
 interface MonthlyPdfInput {
   /** 0-indexed month. */
   year: number;
@@ -65,7 +79,7 @@ export async function buildMonthlyReportPdf({
       page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
       y = PAGE_HEIGHT - MARGIN;
     }
-    page.drawText(text, { x: MARGIN, y, size, font: f, color });
+    page.drawText(sanitize(text), { x: MARGIN, y, size, font: f, color });
     y -= gap;
   };
 
@@ -99,10 +113,10 @@ export async function buildMonthlyReportPdf({
           page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
           y = PAGE_HEIGHT - MARGIN;
         }
-        page.drawText(item.name, { x: MARGIN, y, size: 12, font, color: DARK });
+        page.drawText(sanitize(item.name), { x: MARGIN, y, size: 12, font, color: DARK });
         const amount = rupees(item.total);
         const width = font.widthOfTextAtSize(amount, 12);
-        page.drawText(amount, { x: PAGE_WIDTH - MARGIN - width, y, size: 12, font, color: section.color });
+        page.drawText(sanitize(amount), { x: PAGE_WIDTH - MARGIN - width, y, size: 12, font, color: section.color });
         y -= 20;
       }
     }
@@ -200,10 +214,11 @@ function statementColumns(
 
 /** Shortens text so it fits a column width (Helvetica has no word wrap). */
 function fit(font: PDFFont, text: string, size: number, maxWidth: number): string {
-  if (font.widthOfTextAtSize(text, size) <= maxWidth) {
-    return text;
+  const safe = sanitize(text);
+  if (font.widthOfTextAtSize(safe, size) <= maxWidth) {
+    return safe;
   }
-  let out = text;
+  let out = safe;
   while (out.length > 1 && font.widthOfTextAtSize(`${out.slice(0, -1)}…`, size) > maxWidth) {
     out = out.slice(0, -1);
   }
@@ -232,12 +247,14 @@ export async function buildStatementReportPdf(
   let y = PAGE_HEIGHT - MARGIN;
 
   const rightAligned = (text: string, size: number, f: PDFFont, color: ReturnType<typeof rgb>, right: number) => {
-    const width = f.widthOfTextAtSize(text, size);
-    page.drawText(text, { x: right - width, y, size, font: f, color });
+    const safe = sanitize(text);
+    const width = f.widthOfTextAtSize(safe, size);
+    page.drawText(safe, { x: right - width, y, size, font: f, color });
   };
   const cellRight = (col: ReportColumn, text: string, size: number, f: PDFFont, color: ReturnType<typeof rgb>) => {
-    const width = f.widthOfTextAtSize(text, size);
-    page.drawText(text, { x: col.x + col.width - width, y, size, font: f, color });
+    const safe = sanitize(text);
+    const width = f.widthOfTextAtSize(safe, size);
+    page.drawText(safe, { x: col.x + col.width - width, y, size, font: f, color });
   };
 
   /** Starts a fresh page and redraws the running table headers. */
@@ -262,7 +279,7 @@ export async function buildStatementReportPdf(
       if (col.align === 'right') {
         rightAligned(col.label, 9, bold, DARK, col.x + col.width);
       } else {
-        page.drawText(col.label, { x: col.x, y, size: 9, font: bold, color: DARK });
+        page.drawText(sanitize(col.label), { x: col.x, y, size: 9, font: bold, color: DARK });
       }
     }
     y -= 22;
@@ -272,12 +289,12 @@ export async function buildStatementReportPdf(
 
   const drawMonthHeader = (label: string) => {
     page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_WIDTH, height: 16, color: LIGHT });
-    page.drawText(label, { x: MARGIN + 8, y, size: 10.5, font: bold, color: BRAND });
+    page.drawText(sanitize(label), { x: MARGIN + 8, y, size: 10.5, font: bold, color: BRAND });
     y -= 20;
   };
 
   const drawTotalsRow = (label: string, debit: number, credit: number, running?: number) => {
-    page.drawText(label, { x: MARGIN + 8, y, size: 9.5, font: bold, color: DARK });
+    page.drawText(sanitize(label), { x: MARGIN + 8, y, size: 9.5, font: bold, color: DARK });
     for (const col of cols) {
       if (col.key === 'debit') cellRight(col, rupees(debit), 9.5, bold, DARK);
       if (col.key === 'credit') cellRight(col, rupees(credit), 9.5, bold, DARK);
@@ -292,29 +309,29 @@ export async function buildStatementReportPdf(
   page.drawEllipse({ x: cx, y: cy, xScale: 14, yScale: 14, color: BRAND });
   const logoText = 'DK';
   const logoWidth = bold.widthOfTextAtSize(logoText, 12);
-  page.drawText(logoText, { x: cx - logoWidth / 2, y: cy - 4.5, size: 12, font: bold, color: rgb(1, 1, 1) });
+  page.drawText(sanitize(logoText), { x: cx - logoWidth / 2, y: cy - 4.5, size: 12, font: bold, color: rgb(1, 1, 1) });
 
-  page.drawText('DailyKhata', { x: MARGIN + 34, y, size: 22, font: bold, color: DARK });
-  page.drawText('Your khata ledger, made simple', { x: MARGIN + 34, y: y - 16, size: 9, font, color: GRAY });
+  page.drawText(sanitize('DailyKhata'), { x: MARGIN + 34, y, size: 22, font: bold, color: DARK });
+  page.drawText(sanitize('Your khata ledger, made simple'), { x: MARGIN + 34, y: y - 16, size: 9, font, color: GRAY });
 
   const kind = report.party.type === 'customer' ? 'Customer' : 'Supplier';
   const title = `${kind} Statement`;
   const titleWidth = bold.widthOfTextAtSize(title, 14);
-  page.drawText(title, { x: PAGE_WIDTH - MARGIN - titleWidth, y: y - 4, size: 14, font: bold, color: BRAND });
+  page.drawText(sanitize(title), { x: PAGE_WIDTH - MARGIN - titleWidth, y: y - 4, size: 14, font: bold, color: BRAND });
 
   y -= 46;
   page.drawRectangle({ x: MARGIN, y, width: CONTENT_WIDTH, height: 2.5, color: BRAND });
   y -= 18;
 
   // ===== Party + meta =====
-  page.drawText(report.party.name, { x: MARGIN, y, size: 16, font: bold, color: DARK });
+  page.drawText(sanitize(report.party.name), { x: MARGIN, y, size: 16, font: bold, color: DARK });
   y -= 20;
   const partyLine = report.party.phone ? `${kind}  •  ${report.party.phone}` : kind;
-  page.drawText(partyLine, { x: MARGIN, y, size: 11, font, color: GRAY });
+  page.drawText(sanitize(partyLine), { x: MARGIN, y, size: 11, font, color: GRAY });
   y -= 18;
-  page.drawText(`Report period:  ${formatReportRange(report.from, report.to)}`, { x: MARGIN, y, size: 10, font, color: GRAY });
+  page.drawText(sanitize(`Report period:  ${formatReportRange(report.from, report.to)}`), { x: MARGIN, y, size: 10, font, color: GRAY });
   y -= 14;
-  page.drawText(`Generated:  ${formatDateTime(report.generatedAt)}`, { x: MARGIN, y, size: 10, font, color: GRAY });
+  page.drawText(sanitize(`Generated:  ${formatDateTime(report.generatedAt)}`), { x: MARGIN, y, size: 10, font, color: GRAY });
   y -= 20;
 
   // ===== Summary box =====
@@ -339,7 +356,7 @@ export async function buildStatementReportPdf(
 
   page.drawRectangle({ x: MARGIN, y: y - boxHeight, width: CONTENT_WIDTH, height: boxHeight, color: LIGHT });
   page.drawRectangle({ x: MARGIN, y: y - boxHeight, width: CONTENT_WIDTH, height: boxHeight, borderColor: BORDER, borderWidth: 1 });
-  page.drawText('Summary', { x: MARGIN + boxPad, y: y - boxPad - 12, size: 12, font: bold, color: DARK });
+  page.drawText(sanitize('Summary'), { x: MARGIN + boxPad, y: y - boxPad - 12, size: 12, font: bold, color: DARK });
 
   const cellW = (CONTENT_WIDTH - boxPad * 2) / figCols;
   figures.forEach((fig, index) => {
@@ -347,9 +364,10 @@ export async function buildStatementReportPdf(
     const col = index % figCols;
     const fx = MARGIN + boxPad + col * cellW;
     const fy = y - boxPad - boxTitleH - row * boxRowH;
-    page.drawText(fig.label, { x: fx, y: fy, size: 8.5, font, color: GRAY });
-    const valueWidth = bold.widthOfTextAtSize(fig.value, 13);
-    page.drawText(fig.value, { x: fx + cellW - valueWidth, y: fy - 16, size: 13, font: bold, color: fig.color ?? DARK });
+    page.drawText(sanitize(fig.label), { x: fx, y: fy, size: 8.5, font, color: GRAY });
+    const safeValue = sanitize(fig.value);
+    const valueWidth = bold.widthOfTextAtSize(safeValue, 13);
+    page.drawText(safeValue, { x: fx + cellW - valueWidth, y: fy - 16, size: 13, font: bold, color: fig.color ?? DARK });
   });
 
   y = y - boxHeight - 22;
@@ -360,9 +378,9 @@ export async function buildStatementReportPdf(
   if (include.openingBalance) {
     ensureSpace(18);
     const descCol = cols.find((c) => c.key === 'desc');
-    page.drawText(formatISOToDisplay(report.from || report.to) || '—', { x: cols[0].x, y, size: 10, font, color: DARK });
+    page.drawText(sanitize(formatISOToDisplay(report.from || report.to) || '—'), { x: cols[0].x, y, size: 10, font, color: DARK });
     if (descCol) {
-      page.drawText('Opening Balance', { x: descCol.x, y, size: 10, font, color: GRAY });
+      page.drawText(sanitize('Opening Balance'), { x: descCol.x, y, size: 10, font, color: GRAY });
     }
     const runningCol = cols.find((c) => c.key === 'running');
     if (runningCol) {
@@ -372,7 +390,7 @@ export async function buildStatementReportPdf(
   }
 
   if (report.months.length === 0) {
-    page.drawText('No entries recorded in this period.', { x: MARGIN, y: y - 4, size: 11, font, color: GRAY });
+    page.drawText(sanitize('No entries recorded in this period.'), { x: MARGIN, y: y - 4, size: 11, font, color: GRAY });
   } else {
     for (let m = 0; m < report.months.length; m++) {
       const month = report.months[m];
@@ -388,7 +406,7 @@ export async function buildStatementReportPdf(
         }
         for (const col of cols) {
           if (col.key === 'date') {
-            page.drawText(formatISOToDisplay(entry.date), { x: col.x, y, size: 10, font, color: DARK });
+            page.drawText(sanitize(formatISOToDisplay(entry.date)), { x: col.x, y, size: 10, font, color: DARK });
           } else if (col.key === 'desc') {
             page.drawText(fit(font, entry.description, 10, col.width), { x: col.x, y, size: 10, font, color: DARK });
             if (include.notes && entry.note) {
@@ -419,7 +437,7 @@ export async function buildStatementReportPdf(
   ensureSpace(30);
   page.drawRectangle({ x: MARGIN, y: y + 6, width: CONTENT_WIDTH, height: 1.6, color: BRAND });
   page.drawRectangle({ x: MARGIN, y: y - 6, width: CONTENT_WIDTH, height: 18, color: LIGHT });
-  page.drawText('Grand Total', { x: MARGIN + 8, y, size: 10.5, font: bold, color: DARK });
+  page.drawText(sanitize('Grand Total'), { x: MARGIN + 8, y, size: 10.5, font: bold, color: DARK });
   for (const col of cols) {
     if (col.key === 'debit') cellRight(col, rupees(report.totalDebit), 10.5, bold, DARK);
     if (col.key === 'credit') cellRight(col, rupees(report.totalCredit), 10.5, bold, DARK);
@@ -433,10 +451,10 @@ export async function buildStatementReportPdf(
   // ===== Footer page numbers (drawn last, on every page) =====
   const pages = doc.getPages();
   pages.forEach((pageNumber, index) => {
-    pageNumber.drawText('DailyKhata', { x: MARGIN, y: 30, size: 9, font, color: GRAY });
+    pageNumber.drawText(sanitize('DailyKhata'), { x: MARGIN, y: 30, size: 9, font, color: GRAY });
     const label = `Page ${index + 1} of ${pages.length}`;
     const width = font.widthOfTextAtSize(label, 9);
-    pageNumber.drawText(label, { x: (PAGE_WIDTH - width) / 2, y: 30, size: 9, font, color: GRAY });
+    pageNumber.drawText(sanitize(label), { x: (PAGE_WIDTH - width) / 2, y: 30, size: 9, font, color: GRAY });
   });
 
   return doc.save();
@@ -475,7 +493,7 @@ export async function buildCombinedPdf({
       page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
       y = PAGE_HEIGHT - MARGIN;
     }
-    page.drawText(text, { x: MARGIN, y, size, font: f, color });
+    page.drawText(sanitize(text), { x: MARGIN, y, size, font: f, color });
     y -= gap;
   };
 
@@ -509,10 +527,10 @@ export async function buildCombinedPdf({
           page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
           y = PAGE_HEIGHT - MARGIN;
         }
-        page.drawText(item.name, { x: MARGIN, y, size: 12, font, color: DARK });
+        page.drawText(sanitize(item.name), { x: MARGIN, y, size: 12, font, color: DARK });
         const amount = rupees(item.total);
         const width = font.widthOfTextAtSize(amount, 12);
-        page.drawText(amount, { x: PAGE_WIDTH - MARGIN - width, y, size: 12, font, color: section.color });
+        page.drawText(sanitize(amount), { x: PAGE_WIDTH - MARGIN - width, y, size: 12, font, color: section.color });
         y -= 20;
       }
     }
@@ -583,7 +601,7 @@ async function drawPartyStatement(
   }
 
   const draw = (text: string, size: number, f: PDFFont, color: ReturnType<typeof rgb>, x = MARGIN) => {
-    page.drawText(text, { x, y: currentY, size, font: f, color });
+    page.drawText(sanitize(text), { x, y: currentY, size, font: f, color });
     currentY -= size + 2;
   };
 
@@ -635,13 +653,13 @@ async function drawPartyStatement(
     const amountStr = `${entryIncreasesBalance(type, entry.direction) ? '+' : '-'}${rupees(entry.amount)}`;
     const width = font.widthOfTextAtSize(amountStr, 10);
 
-    page.drawText(entry.date, { x: MARGIN, y: currentY, size: 10, font, color: DARK });
-    page.drawText(label, { x: MARGIN + 80, y: currentY, size: 10, font, color: GRAY });
-    page.drawText(amountStr, { x: PAGE_WIDTH - MARGIN - width, y: currentY, size: 10, font: bold, color: entryIncreasesBalance(type, entry.direction) ? GREEN : RED });
+    page.drawText(sanitize(entry.date), { x: MARGIN, y: currentY, size: 10, font, color: DARK });
+    page.drawText(sanitize(label), { x: MARGIN + 80, y: currentY, size: 10, font, color: GRAY });
+    page.drawText(sanitize(amountStr), { x: PAGE_WIDTH - MARGIN - width, y: currentY, size: 10, font: bold, color: entryIncreasesBalance(type, entry.direction) ? GREEN : RED });
     currentY -= 14;
 
     if (entry.note) {
-      page.drawText(entry.note, { x: MARGIN + 80, y: currentY, size: 9, font, color: GRAY });
+      page.drawText(sanitize(entry.note), { x: MARGIN + 80, y: currentY, size: 9, font, color: GRAY });
       currentY -= 12;
     }
     currentY -= 4;

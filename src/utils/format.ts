@@ -2,6 +2,17 @@
  * Formatting helpers used across the app (Indian rupee grouping, dates).
  */
 
+/**
+ * Android's `en-IN` locale (ICU) emits U+202F (narrow no-break space) inside
+ * formatted dates/times, e.g. "04 Aug 2026, 4:30 PM". That character is not
+ * part of WinAnsi/Latin-1, so pdf-lib's built-in fonts crash on it with
+ * "WinAnsi cannot encode … 0x202f". Normalize it (and the regular no-break
+ * space) to a plain space so downstream exporters never see it.
+ */
+function normalizeSpaces(value: string): string {
+  return value.replace(/[\u202F\u00A0]/g, ' ');
+}
+
 /** Formats a number as Indian rupees with lakh/crore grouping, e.g. ₹1,23,456. */
 export function formatINR(amount: number): string {
   const sign = amount < 0 ? '-' : '';
@@ -45,7 +56,7 @@ export function formatDateLabel(iso: string): string {
     return 'Yesterday';
   }
 
-  return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+  return normalizeSpaces(d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }));
 }
 
 function toISODate(d: Date): string {
@@ -85,10 +96,12 @@ export function monthBounds(yearMonth: string): { start: string; end: string } {
 
 /** Human label like "August 2026" for a year and 0-indexed month. */
 export function monthLabel(year: number, month: number): string {
-  return new Date(year, month, 1).toLocaleDateString('en-IN', {
-    month: 'long',
-    year: 'numeric',
-  });
+  return normalizeSpaces(
+    new Date(year, month, 1).toLocaleDateString('en-IN', {
+      month: 'long',
+      year: 'numeric',
+    })
+  );
 }
 
 /** Parse ISO date string (YYYY-MM-DD) to Date object (local midnight). */
@@ -100,7 +113,7 @@ export function parseISODate(iso: string): Date {
 /** Format ISO date string (YYYY-MM-DD) to display format "DD MMM YYYY" (e.g., "04 Aug 2026"). */
 export function formatISOToDisplay(iso: string): string {
   const d = parseISODate(iso);
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  return normalizeSpaces(d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }));
 }
 
 /** Format an ISO datetime to "04 Aug 2026, 4:30 PM" (report "generated" line). */
@@ -109,14 +122,16 @@ export function formatDateTime(iso: string): string {
   if (Number.isNaN(d.getTime())) {
     return iso;
   }
-  return d.toLocaleString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
+  return normalizeSpaces(
+    d.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+  );
 }
 
 /** Human label for a report's date range, e.g. "01 Aug 2026 – 07 Aug 2026". */
