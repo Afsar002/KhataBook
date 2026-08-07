@@ -149,6 +149,9 @@ export default function HistoryScreen() {
           stickySectionHeadersEnabled={false}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          windowSize={7}
           renderSectionHeader={({ section }) => (
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionHeader}>
               {section.title}

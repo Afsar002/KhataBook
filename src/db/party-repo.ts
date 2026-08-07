@@ -10,6 +10,7 @@
  */
 import { getDatabase, nowIso } from '@/db/database';
 import { enqueueChange } from '@/db/sync/queue-repo';
+import { LEDGER_PAGE_SIZE, type LedgerCursor } from '@/db/transaction-repo';
 import { getCurrentUserId } from '@/services/supabase/auth';
 import type {
   KhataSummary,
@@ -457,6 +458,49 @@ export async function listPartyTransactions(partyId: number): Promise<PartyTrans
     `,
     partyId
   );
+}
+
+/** One page of a party khata ledger (same shape as the feed pages). */
+export interface PartyLedgerPage {
+  rows: PartyTransaction[];
+  hasMore: boolean;
+  nextCursor: LedgerCursor | null;
+}
+
+/**
+ * One page of a party's khata ledger, newest first. Uses the same keyset
+ * (cursor) pagination as the account/history feeds so the detail screen can
+ * load large ledgers incrementally instead of pulling every row at once.
+ */
+export async function listPartyLedgerPage(
+  partyId: number,
+  cursor?: LedgerCursor
+): Promise<PartyLedgerPage> {
+  const db = getDatabase();
+  const params: (string | number)[] = [partyId];
+  const where = cursor ? 'AND (date < ? OR (date = ? AND id < ?))' : '';
+  if (cursor) {
+    params.push(cursor.date, cursor.date, cursor.id);
+  }
+  const rows = await db.getAllAsync<PartyTransaction>(
+    `
+    SELECT id, party_id AS partyId, direction, amount, note, date, created_at AS createdAt, kind
+    FROM party_transactions
+    WHERE party_id = ?
+    ${where}
+    ORDER BY date DESC, id DESC
+    LIMIT ${LEDGER_PAGE_SIZE + 1}
+    `,
+    ...params
+  );
+  const hasMore = rows.length > LEDGER_PAGE_SIZE;
+  const page = hasMore ? rows.slice(0, LEDGER_PAGE_SIZE) : rows;
+  const last = page[page.length - 1];
+  return {
+    rows: page,
+    hasMore,
+    nextCursor: hasMore && last ? { date: last.date, id: last.id } : null,
+  };
 }
 
 /**

@@ -65,6 +65,9 @@ export default function KhataScreen() {
           keyExtractor={(item) => String(item.id)}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          windowSize={7}
           ItemSeparatorComponent={() => (
             <View style={[styles.separator, { backgroundColor: theme.border }]} />
           )}

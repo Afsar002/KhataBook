@@ -9,7 +9,7 @@ import {
   Phone,
 } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card } from '@/components/card';
@@ -40,7 +40,7 @@ export default function PartyDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const partyId = Number(id);
-  const { party, balance, ledger, refresh } = useParty(partyId);
+  const { party, balance, ledger, hasMore, loadingMore, refresh, loadMore } = useParty(partyId);
   const [sharing, setSharing] = useState(false);
 
   useFocusEffect(
@@ -228,6 +228,9 @@ export default function PartyDetailScreen() {
             keyExtractor={(item) => String(item.id)}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContent}
+            initialNumToRender={12}
+            maxToRenderPerBatch={12}
+            windowSize={7}
             ItemSeparatorComponent={() => (
               <View style={[styles.separator, { backgroundColor: theme.border }]} />
             )}
@@ -246,6 +249,17 @@ export default function PartyDetailScreen() {
                 />
               );
             }}
+            onEndReached={hasMore ? () => void loadMore() : undefined}
+            onEndReachedThreshold={0.4}
+            ListFooterComponent={
+              loadingMore ? (
+                <ActivityIndicator
+                  color={theme.textSecondary}
+                  style={styles.listFooter}
+                  accessibilityLabel="Loading more entries"
+                />
+              ) : null
+            }
             ListEmptyComponent={
               <Card>
                 <EmptyState
@@ -343,5 +357,8 @@ const styles = StyleSheet.create({
   separator: {
     height: 1,
     marginVertical: Spacing.one,
+  },
+  listFooter: {
+    paddingVertical: Spacing.four,
   },
 });

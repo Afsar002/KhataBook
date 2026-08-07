@@ -8,8 +8,10 @@ import {
   getParty,
   getPartyBalance,
   listParties,
+  listPartyLedgerPage,
   updateParty,
 } from '@/db/party-repo';
+import { LEDGER_PAGE_SIZE } from '@/db/transaction-repo';
 
 const mockDb = {
   getAllAsync: jest.fn().mockResolvedValue([]),
@@ -140,5 +142,60 @@ describe('Party repo — opening balances', () => {
     const insert = mockDb.runAsync.mock.calls[0];
     expect(insert[0]).toContain('INSERT INTO party_transactions');
     expect(insert[4]).toBe(1);
+  });
+});
+
+describe('Party repo — paginated ledger', () => {
+  const baseRow = (id: number) => ({
+    id,
+    partyId: 7,
+    direction: 'out',
+    amount: 10,
+    note: null,
+    date: '2026-07-01',
+    createdAt: '2026-07-01T00:00:00.000Z',
+    kind: 'normal',
+  });
+
+  it('returns a page with a next cursor when more rows exist', async () => {
+    const rows = Array.from({ length: LEDGER_PAGE_SIZE + 5 }, (_, i) => baseRow(100 - i));
+    mockDb.getAllAsync.mockResolvedValue(rows);
+
+    const page = await listPartyLedgerPage(7);
+
+    expect(mockDb.getAllAsync).toHaveBeenCalledWith(
+      expect.stringContaining('FROM party_transactions'),
+      7
+    );
+    expect(page.rows).toHaveLength(LEDGER_PAGE_SIZE);
+    expect(page.hasMore).toBe(true);
+    expect(page.nextCursor).toEqual({ date: '2026-07-01', id: 100 - LEDGER_PAGE_SIZE + 1 });
+  });
+
+  it('passes the cursor into the SQL params on subsequent pages', async () => {
+    mockDb.getAllAsync.mockResolvedValue([]);
+
+    const page = await listPartyLedgerPage(7, { date: '2026-07-01', id: 55 });
+
+    expect(mockDb.getAllAsync).toHaveBeenCalledWith(
+      expect.stringContaining('AND (date < ? OR (date = ? AND id < ?))'),
+      7,
+      '2026-07-01',
+      '2026-07-01',
+      55
+    );
+    expect(page.hasMore).toBe(false);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('returns no cursor when the last page fits exactly', async () => {
+    const rows = Array.from({ length: LEDGER_PAGE_SIZE }, (_, i) => baseRow(200 - i));
+    mockDb.getAllAsync.mockResolvedValue(rows);
+
+    const page = await listPartyLedgerPage(7);
+
+    expect(page.rows).toHaveLength(LEDGER_PAGE_SIZE);
+    expect(page.hasMore).toBe(false);
+    expect(page.nextCursor).toBeNull();
   });
 });
