@@ -113,6 +113,9 @@ export function parseISODate(iso: string): Date {
 /** Format ISO date string (YYYY-MM-DD) to display format "DD MMM YYYY" (e.g., "04 Aug 2026"). */
 export function formatISOToDisplay(iso: string): string {
   const d = parseISODate(iso);
+  if (Number.isNaN(d.getTime())) {
+    return iso || '—';
+  }
   return normalizeSpaces(d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }));
 }
 
