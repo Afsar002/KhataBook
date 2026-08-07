@@ -2,9 +2,9 @@
  * Statement report builder for the khata export flow.
  *
  * A "statement" is one party's (customer/supplier) khata history over a date
- * range, laid out like a Khatabook customer statement: opening balance,
- * per-entry debit/credit with running balance, monthly subtotals and grand
- * totals. Both the PDF and Excel (.xlsx) exporters consume the same model.
+ * range, laid out like a Khatabook customer statement: per-entry debit/credit
+ * with running balance, monthly subtotals and grand totals. Both the PDF and
+ * Excel (.xlsx) exporters consume the same model.
  *
  * Balance sign convention (matches `party-repo`):
  * - Customer: an 'out' entry increases the balance (they owe you more).
@@ -31,7 +31,7 @@ export interface StatementInclude {
   notes: boolean;
   /** Show the running-balance column and month-end balance. */
   runningBalance: boolean;
-  /** Show the opening balance (summary line + first table row). */
+  /** Show the opening-balance row in the summary and statement table. */
   openingBalance: boolean;
 }
 
