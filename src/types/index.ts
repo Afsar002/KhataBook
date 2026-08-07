@@ -279,6 +279,20 @@ export interface SyncDevice {
   firstSeenAt: string;
 }
 
+/** One row of the immutable device-local audit trail (compliance/debugging). */
+export interface AuditEvent {
+  id: number;
+  tableName: string;
+  operation: SyncOperation;
+  /** Cloud id of the affected record, when one exists. */
+  recordUuid: string | null;
+  /** User id that performed the mutation, when signed in. */
+  userId: string | null;
+  /** JSON snapshot of the mutation payload for diagnostics. */
+  payload: string | null;
+  createdAt: string;
+}
+
 /**
  * Live multi-device sync mode.
  * - `live`: realtime channel subscribed — remote edits arrive in seconds

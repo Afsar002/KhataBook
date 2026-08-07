@@ -35,3 +35,20 @@ opening_balance (REAL, default 0), created_at. Khata balance is derived at
 query time from opening_balance plus the direction sum:
 customer balance = opening_balance + Σ(out) − Σ(in)  (positive → they owe you)
 supplier balance = opening_balance + Σ(in) − Σ(out)  (positive → you owe them)
+
+## Sync tables
+
+- `sync_queue` — one row per pending change, coalesced by (table_name,
+  record_uuid). Operations: insert | update | delete. Failed ops are parked and
+  manually retried.
+- `sync_meta` — device-local key/value store (pull cursors, last sync, current
+  user id, auto-sync / Wi-Fi-only / sync-interval preferences). Never synced.
+- `sync_history` — human-readable log of sync runs and conflicts.
+- `sync_conflicts` — captured last-write-wins conflicts (both sides snapshotted)
+  for the review screen. Device-local.
+- `sync_devices` — devices that have synced, for the "Synced Devices" list.
+- `audit_log` — append-only trail of every syncable mutation (table,
+  operation, record_uuid, user_id, payload, created_at). Written alongside the
+  queue; never coalesced; purged after 90 days on boot. See
+  [16-security.md](16-security.md).
+- `cash_counts` — daily cash-book reconciliation ("actual cash in hand").

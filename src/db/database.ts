@@ -275,6 +275,19 @@ const SCHEMA_TABLES = `
     date TEXT PRIMARY KEY,
     actual REAL NOT NULL DEFAULT 0
   );
+
+  -- Immutable audit trail of every syncable mutation (compliance/debugging).
+  -- Written alongside the sync queue; device-local, never synced. Rows are
+  -- purged after 90 days on boot (see audit-log-repo).
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    operation TEXT NOT NULL CHECK (operation IN ('insert', 'update', 'delete')),
+    record_uuid TEXT,
+    user_id TEXT,
+    payload TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `;
 
 /**
@@ -369,6 +382,9 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
     }
     if (current < 9) {
       await migrateV9(database);
+    }
+    if (current < 10) {
+      await migrateV10(database);
     }
   });
 }
@@ -739,6 +755,24 @@ async function migrateV9(database: SQLite.SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_sync_conflicts_open ON sync_conflicts(resolved, created_at);
   `);
   await database.runAsync('PRAGMA user_version = 9');
+}
+
+async function migrateV10(database: SQLite.SQLiteDatabase): Promise<void> {
+  // Audit log for all syncable mutations (see SCHEMA_TABLES for the full
+  // definition; this migration adds it to databases created before v10).
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_name TEXT NOT NULL,
+      operation TEXT NOT NULL CHECK (operation IN ('insert', 'update', 'delete')),
+      record_uuid TEXT,
+      user_id TEXT,
+      payload TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
+  `);
+  await database.runAsync('PRAGMA user_version = 10');
 }
 
 export async function initDatabase(): Promise<void> {

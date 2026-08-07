@@ -122,6 +122,10 @@ jest.mock('@/services/sync/events', () => ({
   onRemoteChange: jest.fn(),
 }));
 
+jest.mock('@/db/audit-log-repo', () => ({
+  purgeAuditLog: jest.fn().mockResolvedValue(0),
+}));
+
 jest.mock('@/db/sync/device-repo', () => ({
   recordDeviceSync: jest.fn().mockResolvedValue(undefined),
   listSyncedDevices: jest.fn().mockResolvedValue([]),
@@ -210,6 +214,12 @@ describe('Sync Engine', () => {
     it('purges parked failed ops older than 30 days on boot', async () => {
       await sync.initSyncState();
       expect(queueRepo.purgeParked).toHaveBeenCalledWith(30);
+    });
+
+    it('purges audit-log rows older than 90 days on boot', async () => {
+      const { purgeAuditLog } = require('@/db/audit-log-repo');
+      await sync.initSyncState();
+      expect(purgeAuditLog).toHaveBeenCalledWith(90);
     });
   });
 

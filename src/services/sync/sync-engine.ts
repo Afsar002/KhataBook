@@ -14,6 +14,7 @@
 import * as Network from 'expo-network';
 
 import { APP_VERSION } from '@/constants/app';
+import { purgeAuditLog } from '@/db/audit-log-repo';
 import { nowIso } from '@/db/database';
 import { getSetting, setSetting } from '@/db/settings';
 import { clearQueue, countPending, purgeParked } from '@/db/sync/queue-repo';
@@ -101,6 +102,12 @@ export async function initSyncState(getClient: () => SupabaseClient | null = get
   // queue can't grow unbounded. A failure here must never block boot.
   try {
     await purgeParked(30);
+  } catch {
+    // Ignore cleanup failures — continue boot without them.
+  }
+  // Bound the device-local audit log so it can't grow unbounded.
+  try {
+    await purgeAuditLog(90);
   } catch {
     // Ignore cleanup failures — continue boot without them.
   }

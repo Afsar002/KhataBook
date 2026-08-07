@@ -23,6 +23,12 @@ jest.mock('@/services/sync/events', () => ({
   emitQueueChange: jest.fn(),
 }));
 
+// enqueueChange also writes to the audit trail; mock it so the queue assertions
+// below keep seeing the queue write as the first runAsync call.
+jest.mock('@/db/audit-log-repo', () => ({
+  auditChange: jest.fn().mockResolvedValue(undefined),
+}));
+
 describe('Sync Queue Repo', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -100,6 +106,14 @@ describe('Sync Queue Repo', () => {
         'uuid-1',
         '{}'
       );
+      // The same mutation is also recorded in the immutable audit trail.
+      const { auditChange } = require('@/db/audit-log-repo');
+      expect(auditChange).toHaveBeenCalledWith(mockDb, {
+        table: 'transactions',
+        operation: 'delete',
+        recordUuid: 'uuid-1',
+        payload: null,
+      });
     });
 
     it('stores a JSON-serialized payload when one is provided', async () => {
@@ -113,6 +127,13 @@ describe('Sync Queue Repo', () => {
       });
 
       expect(mockDb.runAsync.mock.calls[0][4]).toBe('{"amount":100}');
+      const { auditChange } = require('@/db/audit-log-repo');
+      expect(auditChange).toHaveBeenCalledWith(mockDb, {
+        table: 'transactions',
+        operation: 'insert',
+        recordUuid: 'uuid-2',
+        payload: { amount: 100 },
+      });
     });
 
     it('coalesces an existing row and lets a delete override an earlier update', async () => {

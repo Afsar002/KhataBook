@@ -83,5 +83,10 @@ types, docs, and changelog when adding screens.
 | `08-development-status.md` | Current build status |
 | `09-future-features.md` | Later ideas |
 | `10-ai-context.md` | Rules for working on the codebase |
+| `11-business-rules.md` | Ledger & khata business rules |
+| `12-glossary.md` | Domain terms |
 | `13-supabase-setup.md` | Enable cloud sync & phone sign-in |
+| `14-optimization-plan.md` | Performance work plan |
+| `15-optimization-report.md` | What was optimized |
+| `16-security.md` | Keys, rotation & the local audit log |
 | `CHANGELOG.md` | Version history |

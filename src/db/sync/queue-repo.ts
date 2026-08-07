@@ -7,6 +7,7 @@
  */
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import { auditChange } from '@/db/audit-log-repo';
 import { getDatabase } from '@/db/database';
 import { emitQueueChange } from '@/services/sync/events';
 import type { SyncOperation, SyncQueueEntry, SyncQueueStatus } from '@/types';
@@ -29,6 +30,16 @@ export const MAX_RETRY_COUNT = 10;
  * a failure rolls both back.
  */
 export async function enqueueChange(db: SQLiteDatabase, change: ChangeToEnqueue): Promise<void> {
+  // Record the mutation in the immutable audit trail (same transaction). The
+  // queue coalesces to one row per (table, uuid); the audit log keeps every
+  // event so the mutation history is never collapsed.
+  await auditChange(db, {
+    table: change.table,
+    operation: change.operation,
+    recordUuid: change.recordUuid,
+    payload: change.payload ?? null,
+  });
+
   // `payload` is NOT NULL; when the caller has no snapshot (update/delete ops,
   // which push re-reads live anyway), store the empty-JSON default instead of
   // JS `null` so the write does not violate the constraint.
