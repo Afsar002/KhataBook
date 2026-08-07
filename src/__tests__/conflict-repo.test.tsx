@@ -54,6 +54,7 @@ describe('Conflict repo', () => {
     expect(sql).toContain('INSERT INTO sync_conflicts');
     expect(table).toBe('transactions');
     expect(uuid).toBe('tx-1');
+    expect(message).toContain('replaced an unsynced local change');
     expect(JSON.parse(localJson).amount).toBe(100);
     expect(JSON.parse(remoteJson).amount).toBe(200);
   });

@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { Banknote, ChevronRight, Inbox, Landmark, Search, TrendingDown, TrendingUp } from 'lucide-react-native';
+import { Banknote, ChevronRight, Landmark, Search, TrendingDown, TrendingUp } from 'lucide-react-native';
 import { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -168,7 +168,7 @@ export default function DashboardScreen() {
         ) : (
           <Card>
             <EmptyState
-              icon={Inbox}
+              type="transactions"
               title="No transactions yet"
               message="Tap '+' to record your first income, expense or transfer."
             />

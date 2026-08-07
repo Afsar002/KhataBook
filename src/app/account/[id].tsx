@@ -71,7 +71,7 @@ export default function AccountDetailScreen() {
     return (
       <Screen>
         <ThemedText type="subtitle">Account</ThemedText>
-        <EmptyState title="Account not found" message="It may have been deleted." />
+        <EmptyState type="account" title="Account not found" message="It may have been deleted." />
       </Screen>
     );
   }
@@ -163,7 +163,7 @@ export default function AccountDetailScreen() {
 
       {ledger.length === 0 ? (
         <EmptyState
-          icon={ReceiptText}
+          type="entries"
           title="No entries yet"
           message="Income, expense and transfers to this account will appear here."
         />

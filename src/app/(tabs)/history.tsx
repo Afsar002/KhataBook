@@ -1,5 +1,4 @@
 import { router, useFocusEffect } from 'expo-router';
-import { ReceiptText } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, SectionList, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -169,7 +168,7 @@ export default function HistoryScreen() {
           }
           ListEmptyComponent={
             <EmptyState
-              icon={ReceiptText}
+              type="entries"
               title={hasActiveFilters || query.trim() ? 'No matching entries' : 'Nothing here yet'}
               message={
                 hasActiveFilters || query.trim()

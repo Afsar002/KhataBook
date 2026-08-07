@@ -8,7 +8,7 @@
  * re-upload.
  */
 import { router } from 'expo-router';
-import { AlertTriangle, Check, ChevronLeft, RotateCcw, ShieldCheck } from 'lucide-react-native';
+import { AlertTriangle, Check, ChevronLeft, RotateCcw } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -21,7 +21,6 @@ import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
-  countUnresolvedConflicts,
   listConflicts,
   resolveConflict,
   restoreLocalVersion,
@@ -165,7 +164,7 @@ export default function ConflictsScreen() {
       ) : conflicts.length === 0 ? (
         <Card>
           <EmptyState
-            icon={ShieldCheck}
+            type="conflicts"
             title="No open conflicts"
             message="Nothing was silently overwritten. Your last sync went through clean."
           />

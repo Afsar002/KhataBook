@@ -5,7 +5,7 @@
  * its detail screen; transaction rows are read-only (like the Home recent list).
  */
 import { router } from 'expo-router';
-import { ChevronLeft, Search } from 'lucide-react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -68,13 +68,13 @@ export default function SearchScreen() {
 
       {!hasQuery ? (
         <EmptyState
-          icon={Search}
+          type="search"
           title="Search everything"
           message="Find transactions, customers, suppliers and accounts by name, note or amount."
         />
       ) : !hasResults ? (
         <EmptyState
-          icon={Search}
+          type="search"
           title="No results"
           message={`Nothing matches “${query.trim()}”. Try a different word or number.`}
         />

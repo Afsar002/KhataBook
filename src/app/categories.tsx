@@ -6,7 +6,7 @@
  * lost. Categories are synced, so changes reach the cloud on the next push.
  */
 import { router, useFocusEffect } from 'expo-router';
-import { ChevronLeft, Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react-native';
+import { ChevronLeft, Pencil, Plus, Trash2 } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -123,7 +123,7 @@ export default function CategoriesScreen() {
 
       {list.length === 0 ? (
         <EmptyState
-          icon={ReceiptText}
+          type="categories"
           title="No categories yet"
           message="Add a category to organise your entries."
         />

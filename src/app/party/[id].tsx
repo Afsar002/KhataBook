@@ -7,7 +7,6 @@ import {
   MessageSquare,
   Pencil,
   Phone,
-  ReceiptText,
 } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -250,7 +249,7 @@ export default function PartyDetailScreen() {
             ListEmptyComponent={
               <Card>
                 <EmptyState
-                  icon={ReceiptText}
+                  type="entries"
                   title="No entries yet"
                   message="Tap Give or Receive money to start this khata."
                 />

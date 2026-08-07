@@ -47,6 +47,7 @@ export default function AccountsScreen() {
 
       {balances.length === 0 ? (
         <EmptyState
+          type="accounts"
           title="No accounts yet"
           message="Tap “Add Account” to keep your money in Cash, Banks and Wallets."
         />

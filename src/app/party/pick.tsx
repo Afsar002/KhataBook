@@ -59,7 +59,7 @@ export default function PartyPickScreen() {
 
       {parties.length === 0 ? (
         <EmptyState
-          icon={UserRound}
+          type="party"
           title="No customers yet"
           message="Tap “Add Customer” to add your first customer, then give or receive money."
         />

@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { Plus, Store, UserRound } from 'lucide-react-native';
+import { Plus } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -72,7 +72,7 @@ export default function KhataScreen() {
           ListEmptyComponent={
             <Card>
               <EmptyState
-                icon={type === 'customer' ? UserRound : Store}
+                type={type === 'customer' ? 'party' : 'store'}
                 title="No people added yet"
                 message="Tap + to add your first customer or supplier."
               />
