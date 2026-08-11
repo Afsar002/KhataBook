@@ -4,7 +4,7 @@
  */
 
 import * as XLSX from 'xlsx';
-import type { PartyDirection, PartyTransaction, PartyType } from '@/types';
+import type { LedgerRow, PartyDirection, PartyTransaction, PartyType } from '@/types';
 import { PARTY_ACTIONS, actionForDirection } from '@/utils/party';
 import { formatINR } from '@/utils/format';
 
@@ -92,7 +92,6 @@ export function partyStatementToExcel(
   name: string,
   phone: string,
   type: PartyType,
-  openingBalance: number,
   balance: number,
   ledger: PartyTransactionWithRunningBalance[]
 ): XLSX.WorkBook {
@@ -103,9 +102,8 @@ export function partyStatementToExcel(
     ['Party Name', name],
     ['Phone', phone],
     ['Type', type === 'customer' ? 'Customer' : 'Supplier'],
-    ['Opening Balance', formatINR(openingBalance)],
-    ['Total Debit (You Gave)', formatINR(ledger.filter((l) => isDebit(type, l.direction)).reduce((sum, l) => sum + l.amount, 0))],
-    ['Total Credit (You Got)', formatINR(ledger.filter((l) => isCredit(type, l.direction)).reduce((sum, l) => sum + l.amount, 0))],
+    ['Total Debit (Out)', formatINR(ledger.filter((l) => isDebit(type, l.direction)).reduce((sum, l) => sum + l.amount, 0))],
+    ['Total Credit (In)', formatINR(ledger.filter((l) => isCredit(type, l.direction)).reduce((sum, l) => sum + l.amount, 0))],
     ['Net Balance', formatINR(balance)],
   ];
 
@@ -114,7 +112,7 @@ export function partyStatementToExcel(
   // Statement sheet
   const statementData = ledger.map((l) => [
     l.date,
-    PARTY_ACTIONS[actionForDirection(type, l.direction)].title,
+    l.note || PARTY_ACTIONS[actionForDirection(type, l.direction)].title,
     isDebit(type, l.direction) ? formatINR(l.amount) : '',
     isCredit(type, l.direction) ? formatINR(l.amount) : '',
     formatINR(l.runningBalance),
@@ -122,6 +120,47 @@ export function partyStatementToExcel(
   ]);
 
   addSheet(wb, 'Statement', ['Date', 'Description', 'Debit', 'Credit', 'Running Balance', 'Notes'], statementData, [12, 20, 14, 14, 18, 30]);
+
+  return wb;
+}
+
+/**
+ * Transactions list → Excel workbook.
+ * Sheet "Transactions" — Date | Type | Note | Category | Account | Amount (signed number)
+ */
+export function transactionsToExcel(entries: LedgerRow[]): XLSX.WorkBook {
+  const wb = createWorkbook();
+
+  const data = entries.map((e) => {
+    let type = '';
+    let amount = 0;
+    let category = '';
+    let account = '';
+
+    if (e.entryKind === 'opening') {
+      type = 'Opening Balance';
+      amount = e.amount;
+      account = e.accountName ?? '';
+    } else if (e.kind === 'transfer') {
+      type = 'Transfer';
+      amount = e.amount;
+      category = `${e.fromAccountName ?? ''} → ${e.toAccountName ?? ''}`;
+    } else if (e.kind === 'income') {
+      type = 'Income';
+      amount = e.amount;
+      category = e.categoryName ?? '';
+      account = e.accountName ?? '';
+    } else {
+      type = 'Expense';
+      amount = -e.amount;
+      category = e.categoryName ?? '';
+      account = e.accountName ?? '';
+    }
+
+    return [e.date, type, e.note, category, account, amount];
+  });
+
+  addSheet(wb, 'Transactions', ['Date', 'Type', 'Note', 'Category', 'Account', 'Amount'], data, [12, 16, 30, 20, 20, 16]);
 
   return wb;
 }
@@ -147,8 +186,8 @@ export function monthlyReportToExcel(
     ['Expense', formatINR(report.summary.expense)],
     ['Profit / Loss', formatINR(profit)],
     [''],
-    ['Money Given (Khata)', formatINR(report.party.given)],
-    ['Money Received (Khata)', formatINR(report.party.received)],
+    ['Money Out (Khata)', formatINR(report.party.given)],
+    ['Money In (Khata)', formatINR(report.party.received)],
   ];
   addSheet(wb, 'Summary', ['Field', 'Value'], summaryData, [25, 25]);
 

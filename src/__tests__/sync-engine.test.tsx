@@ -120,6 +120,7 @@ jest.mock('@/services/sync/events', () => ({
   // that leaks into every test.
   onQueueChange: jest.fn(),
   onRemoteChange: jest.fn(),
+  emitSyncResult: jest.fn(),
 }));
 
 jest.mock('@/db/audit-log-repo', () => ({

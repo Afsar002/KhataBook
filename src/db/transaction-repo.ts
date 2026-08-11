@@ -13,7 +13,8 @@ import type {
   TransactionRow,
   TransactionType,
 } from '@/types';
-import { monthBounds } from '@/utils/format';
+import { safeParseAttachments } from '@/utils/attachments';
+import { monthBounds, nowTime } from '@/utils/format';
 import { likeParam, SEARCH_LIMIT } from '@/utils/search';
 import { uuid } from '@/utils/uuid';
 
@@ -57,8 +58,9 @@ export async function addTransaction(tx: NewTransaction): Promise<number> {
   const now = nowIso();
   const userId = getCurrentUserId();
   const kind = tx.kind ?? 'normal';
+  const time = tx.time ?? nowTime();
   const result = await db.runAsync(
-    'INSERT INTO transactions (uuid, user_id, updated_at, type, amount, account_id, category_id, note, date, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO transactions (uuid, user_id, updated_at, type, amount, account_id, category_id, note, date, time, kind, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     recordUuid,
     userId,
     now,
@@ -68,7 +70,9 @@ export async function addTransaction(tx: NewTransaction): Promise<number> {
     tx.categoryId,
     tx.note,
     tx.date,
-    kind
+    time,
+    kind,
+    JSON.stringify(tx.attachments ?? [])
   );
   await enqueueChange(db, {
     table: 'transactions',
@@ -82,7 +86,7 @@ export async function addTransaction(tx: NewTransaction): Promise<number> {
 /** Loads a single transaction (joined with its account + category) for editing. */
 export async function getTransaction(id: number): Promise<TransactionRow | null> {
   const db = getDatabase();
-  return db.getFirstAsync<TransactionRow>(
+  const row = await db.getFirstAsync<TransactionRow & { attachmentsRaw?: string | null }>(
     `
     SELECT
       t.id,
@@ -92,8 +96,10 @@ export async function getTransaction(id: number): Promise<TransactionRow | null>
       t.category_id AS categoryId,
       t.note,
       t.date,
+      t.time,
       t.created_at AS createdAt,
       t.kind,
+      t.attachments AS attachmentsRaw,
       a.name AS accountName,
       a.type AS accountType,
       c.name AS categoryName,
@@ -105,6 +111,11 @@ export async function getTransaction(id: number): Promise<TransactionRow | null>
     `,
     id
   );
+  if (!row) {
+    return null;
+  }
+  const { attachmentsRaw, ...rest } = row;
+  return { ...rest, attachments: safeParseAttachments(attachmentsRaw) };
 }
 
 export async function updateTransaction(
@@ -126,7 +137,7 @@ export async function updateTransaction(
     }
     const kind = input.kind ?? 'normal';
     await db.runAsync(
-      'UPDATE transactions SET updated_at = ?, type = ?, amount = ?, account_id = ?, category_id = ?, note = ?, date = ?, kind = ? WHERE id = ?',
+      'UPDATE transactions SET updated_at = ?, type = ?, amount = ?, account_id = ?, category_id = ?, note = ?, date = ?, kind = ?, attachments = ? WHERE id = ?',
       nowIso(),
       input.type,
       input.amount,
@@ -135,6 +146,7 @@ export async function updateTransaction(
       input.note,
       input.date,
       kind,
+      JSON.stringify(input.attachments ?? []),
       id
     );
     if (row?.uuid) {
@@ -176,6 +188,7 @@ export async function listTransactions(limit?: number): Promise<TransactionRow[]
       t.category_id AS categoryId,
       t.note,
       t.date,
+      t.time,
       t.created_at AS createdAt,
       t.kind,
       a.name AS accountName,
@@ -197,6 +210,7 @@ const LEDGER_SELECT = `
     t.amount,
     t.note,
     t.date,
+    t.time AS time,
     t.created_at AS createdAt,
     t.account_id AS accountId,
     a.name AS accountName,
@@ -204,6 +218,7 @@ const LEDGER_SELECT = `
     c.name AS categoryName,
     c.icon AS categoryIcon,
     t.kind AS entryKind,
+    t.attachments AS attachmentsRaw,
     NULL AS fromAccountId,
     NULL AS fromAccountName,
     NULL AS toAccountId,
@@ -220,6 +235,7 @@ const TRANSFER_SELECT = `
     tr.amount,
     tr.note,
     tr.date,
+    tr.time AS time,
     tr.created_at AS createdAt,
     NULL AS accountId,
     NULL AS accountName,
@@ -227,6 +243,7 @@ const TRANSFER_SELECT = `
     NULL AS categoryName,
     NULL AS categoryIcon,
     'normal' AS entryKind,
+    NULL AS attachmentsRaw,
     tr.from_account_id AS fromAccountId,
     fa.name AS fromAccountName,
     tr.to_account_id AS toAccountId,
@@ -264,19 +281,142 @@ const LEDGER_FEED = `
   ) AS feed
 `;
 
-/** One page of the combined feed, newest first. */
-export async function listLedgerPage(cursor?: LedgerCursor): Promise<LedgerPage> {
-  const db = getDatabase();
+/** Full `YYYY-MM-DD` — shorter partial dates are ignored, matching the UI. */
+const LEDGER_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * History screen filters, mirroring `HistoryFiltersState`. Applied as SQL
+ * WHERE clauses over the `feed` subquery (see `buildLedgerFilter`).
+ */
+export interface LedgerFilter {
+  /** Free-text search across note / category / account names / amount. */
+  query?: string;
+  /** Inclusive lower bound for `feed.date` (`YYYY-MM-DD`). */
+  dateFrom?: string;
+  /** Inclusive upper bound for `feed.date` (`YYYY-MM-DD`). */
+  dateTo?: string;
+  /** Inclusive lower bound for `feed.amount`. */
+  minAmount?: string;
+  /** Inclusive upper bound for `feed.amount`. */
+  maxAmount?: string;
+  /** Keep rows touching any of these accounts (transaction account or transfer ends). */
+  accountIds?: number[];
+  /** Keep rows in any of these categories (transactions only). */
+  categoryIds?: number[];
+}
+
+/**
+ * Builds the WHERE clause + params for a `LedgerFilter`, matched against the
+ * `feed` subquery columns. Text search reuses the same LIKE semantics as
+ * `searchLedgerByLike` (wildcard-escaped, ASCII case-insensitive, and numeric
+ * queries also match amounts as text). Returns an empty `where` when nothing
+ * is set, so callers can splice it with a cursor clause.
+ */
+export function buildLedgerFilter(filter: LedgerFilter): {
+  where: string;
+  params: (string | number)[];
+} {
+  const parts: string[] = [];
   const params: (string | number)[] = [];
-  const where = cursor ? 'WHERE feed.date < ? OR (feed.date = ? AND feed.id < ?)' : '';
+
+  const q = filter.query?.trim() ?? '';
+  if (q) {
+    const like = likeParam(q);
+    params.push(like, like, like, like, like);
+    const numeric = q.replace(/[^0-9]/g, '');
+    if (numeric) {
+      params.push(`%${numeric}%`);
+    }
+    const amountClause = numeric
+      ? ` OR CAST(feed.amount AS TEXT) LIKE ? ESCAPE '\\'`
+      : '';
+    parts.push(
+      `(feed.note LIKE ? ESCAPE '\\' OR feed.categoryName LIKE ? ESCAPE '\\' ` +
+        `OR feed.accountName LIKE ? ESCAPE '\\' OR feed.fromAccountName LIKE ? ESCAPE '\\' ` +
+        `OR feed.toAccountName LIKE ? ESCAPE '\\'${amountClause})`
+    );
+  }
+
+  if (filter.dateFrom && LEDGER_DATE_RE.test(filter.dateFrom)) {
+    parts.push('feed.date >= ?');
+    params.push(filter.dateFrom);
+  }
+  if (filter.dateTo && LEDGER_DATE_RE.test(filter.dateTo)) {
+    parts.push('feed.date <= ?');
+    params.push(filter.dateTo);
+  }
+  const min = Number(filter.minAmount);
+  if (filter.minAmount !== '' && !Number.isNaN(min)) {
+    parts.push('feed.amount >= ?');
+    params.push(min);
+  }
+  const max = Number(filter.maxAmount);
+  if (filter.maxAmount !== '' && !Number.isNaN(max)) {
+    parts.push('feed.amount <= ?');
+    params.push(max);
+  }
+  if (filter.accountIds && filter.accountIds.length > 0) {
+    const ph = filter.accountIds.map(() => '?').join(',');
+    parts.push(
+      `(feed.accountId IN (${ph}) OR feed.fromAccountId IN (${ph}) OR feed.toAccountId IN (${ph}))`
+    );
+    params.push(...filter.accountIds, ...filter.accountIds, ...filter.accountIds);
+  }
+  if (filter.categoryIds && filter.categoryIds.length > 0) {
+    const ph = filter.categoryIds.map(() => '?').join(',');
+    parts.push(`feed.categoryId IN (${ph})`);
+    params.push(...filter.categoryIds);
+  }
+
+  return { where: parts.join(' AND '), params };
+}
+
+/** One page of the combined feed, newest first, filtered by `filter` (if any). */
+export async function listLedgerPage(
+  filter?: LedgerFilter,
+  cursor?: LedgerCursor | null
+): Promise<LedgerPage> {
+  const db = getDatabase();
+  const parts: string[] = [];
+  const params: (string | number)[] = [];
+  const built = buildLedgerFilter(filter ?? {});
+  if (built.where) {
+    parts.push(built.where);
+    params.push(...built.params);
+  }
   if (cursor) {
+    parts.push('(feed.date < ? OR (feed.date = ? AND feed.id < ?))');
     params.push(cursor.date, cursor.date, cursor.id);
   }
-  const rows = await db.getAllAsync<LedgerRow>(
+  const where = parts.length > 0 ? ` WHERE ${parts.join(' AND ')}` : '';
+  const rows = await db.getAllAsync<LedgerRawRow>(
     `${LEDGER_FEED} ${where} ORDER BY feed.date DESC, feed.id DESC LIMIT ${LEDGER_PAGE_SIZE + 1}`,
     ...params
   );
-  return pageResult(rows);
+  return pageResult(rows.map(toLedgerRow));
+}
+
+/**
+ * All ledger rows within an inclusive date range, **newest first**. Pages
+ * through `listLedgerPage({ dateFrom, dateTo })` until `hasMore` is false
+ * (each page is already newest-first) and returns the accumulated array. Used
+ * by the Cashbook, the day-detail screen and the transactions report — all
+ * ledgers show the newest entry at the top.
+ */
+export async function listLedgerRange(
+  from?: string,
+  to?: string
+): Promise<LedgerRow[]> {
+  const all: LedgerRow[] = [];
+  let cursor: LedgerCursor | null = null;
+  let hasMore = true;
+  while (hasMore) {
+    const page = await listLedgerPage({ dateFrom: from, dateTo: to }, cursor);
+    all.push(...page.rows);
+    hasMore = page.hasMore;
+    cursor = page.nextCursor;
+  }
+  return all;
 }
 
 /** One page of the feed limited to one account's entries + transfers. */
@@ -290,7 +430,7 @@ export async function listAccountLedgerPage(
   if (cursor) {
     params.push(cursor.date, cursor.date, cursor.id);
   }
-  const rows = await db.getAllAsync<LedgerRow>(
+  const rows = await db.getAllAsync<LedgerRawRow>(
     `
     SELECT * FROM (
       ${LEDGER_SELECT}
@@ -305,7 +445,20 @@ export async function listAccountLedgerPage(
     `,
     ...params
   );
-  return pageResult(rows);
+  return pageResult(rows.map(toLedgerRow));
+}
+
+/** Raw feed row as returned by SQL, with the attachments JSON column exposed. */
+type LedgerRawRow = LedgerRow & { attachmentsRaw?: string | null };
+
+/**
+ * Maps a raw feed row to a `LedgerRow`, converting the stored attachments JSON
+ * into the cheap `hasAttachments` flag. The full metadata stays out of feed
+ * rows — the edit form loads it separately via `getTransaction`/`getTransfer`.
+ */
+function toLedgerRow(raw: LedgerRawRow): LedgerRow {
+  const { attachmentsRaw, ...rest } = raw;
+  return { ...rest, hasAttachments: safeParseAttachments(attachmentsRaw).length > 0 };
 }
 
 /** Splits a fetched page into its rows + next-page cursor. */
@@ -363,8 +516,11 @@ async function searchLedgerByFts(
     parts.push(`(${TRANSFER_SELECT} WHERE tr.id IN (${transferIds.map(() => '?').join(',')}))`);
     params.push(...transferIds);
   }
-  const rows = await db.getAllAsync<LedgerRow>(parts.join(' UNION ALL '), ...params);
-  return rows.sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id).slice(0, limit);
+  const rows = await db.getAllAsync<LedgerRawRow>(parts.join(' UNION ALL '), ...params);
+  return rows
+    .map(toLedgerRow)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+    .slice(0, limit);
 }
 
 /** LIKE-backed search: substring match across the whole feed. */
@@ -383,7 +539,7 @@ async function searchLedgerByLike(
   const amountClause = numeric
     ? ` OR CAST(feed.amount AS TEXT) LIKE ? ESCAPE '\\'`
     : '';
-  return db.getAllAsync<LedgerRow>(
+  const rows = await db.getAllAsync<LedgerRawRow>(
     `
     SELECT * FROM (
       ${LEDGER_SELECT}
@@ -401,6 +557,7 @@ async function searchLedgerByLike(
     `,
     ...params
   );
+  return rows.map(toLedgerRow);
 }
 
 /** Income and expense totals for a single day (`YYYY-MM-DD`). */
@@ -417,6 +574,112 @@ export async function getDaySummary(date: string): Promise<DaySummary> {
     date
   );
   return { income: row?.income ?? 0, expense: row?.expense ?? 0 };
+}
+
+/** One day's aggregated ledger row (see `listDaySummaries`). */
+export interface DayLedgerSummary {
+  date: string;
+  entryCount: number;
+  income: number;
+  expense: number;
+  cashInHand: number;
+}
+
+/**
+ * Per-day ledger summary for a date range, newest first. `cashInHand` is the
+ * running balance computed over ALL days (not just the range), so the first
+ * row carries the true pre-range balance in. Omit `from`/`to` for all time.
+ */
+export async function listDaySummaries(from?: string, to?: string): Promise<DayLedgerSummary[]> {
+  const db = getDatabase();
+  const params: string[] = [];
+  let bounds = '';
+  if (from && to) {
+    bounds = 'WHERE date >= ? AND date <= ?';
+    params.push(from, to);
+  }
+  return db.getAllAsync<DayLedgerSummary>(
+    `
+    WITH day_net AS (
+      SELECT date,
+        COUNT(*) AS entryCount,
+        COALESCE(SUM(CASE WHEN type = 'income' THEN amount END), 0) AS income,
+        COALESCE(SUM(CASE WHEN type = 'expense' THEN amount END), 0) AS expense
+      FROM transactions
+      GROUP BY date
+    ), cumulative AS (
+      SELECT date, entryCount, income, expense,
+             SUM(income - expense) OVER (ORDER BY date) AS cashInHand
+      FROM day_net
+    )
+    SELECT * FROM cumulative
+    ${bounds}
+    ORDER BY date DESC
+    `,
+    ...params
+  );
+}
+
+/**
+ * Cumulative balance (all accounts) up to and including `date`.
+ *
+ * `listDaySummaries` only emits rows for days that appear in the ledger, so a
+ * day with no transactions (e.g. today before any entry is recorded) returns no
+ * row and the Cashbook would otherwise show ₹0 for Cash in Hand. The running
+ * balance still exists on such days — it just hasn't changed. Callers use this
+ * to synthesize the summary for an entry-less day.
+ */
+export async function getRunningBalance(date: string): Promise<number> {
+  const db = getDatabase();
+  const row = await db.getFirstAsync<{ balance: number }>(
+    `SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) AS balance
+     FROM transactions
+     WHERE date <= ?`,
+    date
+  );
+  return row?.balance ?? 0;
+}
+
+/**
+ * Summary row for a single day, always present. A day with no entries returns
+ * no row from `listDaySummaries`; this synthesizes one with the day's running
+ * balance so Cash in Hand never shows ₹0 (the true balance still exists — it
+ * just hasn't changed that day).
+ */
+export async function getDayLedgerSummary(date: string): Promise<DayLedgerSummary> {
+  const rows = await listDaySummaries(date, date);
+  if (rows[0]) {
+    return rows[0];
+  }
+  return {
+    date,
+    entryCount: 0,
+    income: 0,
+    expense: 0,
+    cashInHand: await getRunningBalance(date),
+  };
+}
+
+/**
+ * Normalize a `listDaySummaries` result so every day's `cashInHand` exactly
+ * equals the previous day's `cashInHand` plus that day's own balance
+ * (income − expense). The SQL already computes the running window, but this
+ * re-derives it bottom-up as a hard guarantee: the earliest row keeps its SQL
+ * value (which carries the pre-range balance in for bounded ranges) and each
+ * later row is rebuilt as `previous + current`. Pass rows newest-first (as
+ * returned by the query); the result is returned newest-first too.
+ */
+export function runningCashInHand(days: DayLedgerSummary[]): DayLedgerSummary[] {
+  if (days.length === 0) {
+    return days;
+  }
+  const asc = [...days].reverse();
+  let running = asc[0].cashInHand;
+  for (let i = 1; i < asc.length; i++) {
+    running += asc[i].income - asc[i].expense;
+    asc[i] = { ...asc[i], cashInHand: running };
+  }
+  return asc.reverse();
 }
 
 /** Income and expense totals for a month (`YYYY-MM`). */

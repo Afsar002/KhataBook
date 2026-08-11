@@ -3,6 +3,7 @@ import { getDatabase, nowIso } from '@/db/database';
 import { enqueueChange } from '@/db/sync/queue-repo';
 import { getCurrentUserId } from '@/services/supabase/auth';
 import type { NewTransfer, TransferRow } from '@/types';
+import { nowTime } from '@/utils/format';
 import { uuid } from '@/utils/uuid';
 
 export async function addTransfer(tx: NewTransfer): Promise<number> {
@@ -16,8 +17,9 @@ export async function addTransfer(tx: NewTransfer): Promise<number> {
   const recordUuid = uuid();
   const now = nowIso();
   const userId = getCurrentUserId();
+  const time = tx.time ?? nowTime();
   const result = await db.runAsync(
-    'INSERT INTO transfers (uuid, user_id, updated_at, from_account_id, to_account_id, amount, note, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO transfers (uuid, user_id, updated_at, from_account_id, to_account_id, amount, note, date, time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     recordUuid,
     userId,
     now,
@@ -25,7 +27,8 @@ export async function addTransfer(tx: NewTransfer): Promise<number> {
     tx.toAccountId,
     tx.amount,
     tx.note,
-    tx.date
+    tx.date,
+    time
   );
   await enqueueChange(db, {
     table: 'transfers',
@@ -48,6 +51,7 @@ export async function getTransfer(id: number): Promise<TransferRow | null> {
       tr.amount,
       tr.note,
       tr.date,
+      tr.time AS time,
       tr.created_at AS createdAt,
       fa.name AS fromAccountName,
       fa.type AS fromAccountType,
@@ -120,6 +124,7 @@ export async function listTransfers(): Promise<TransferRow[]> {
       tr.amount,
       tr.note,
       tr.date,
+      tr.time AS time,
       tr.created_at AS createdAt,
       fa.name AS fromAccountName,
       fa.type AS fromAccountType,

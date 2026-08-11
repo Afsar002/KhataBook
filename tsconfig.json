@@ -9,7 +9,7 @@
     "strictPropertyInitialization": true,
     "noImplicitThis": true,
     "alwaysStrict": true,
-    "types": ["jest"],
+    "types": ["jest", "node"],
     "paths": {
       "@/*": [
         "./src/*"

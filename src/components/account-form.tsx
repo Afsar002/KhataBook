@@ -5,6 +5,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/card';
 import { LargeButton } from '@/components/large-button';
+import { ScreenHeader } from '@/components/screen-header';
 import { Segment } from '@/components/segment';
 import { TextField } from '@/components/text-field';
 import { ThemedText } from '@/components/themed-text';
@@ -45,7 +46,7 @@ export function AccountForm() {
 
   return (
     <View style={styles.wrap}>
-      <ThemedText type="subtitle">Add Account</ThemedText>
+      <ScreenHeader title="Add Account" />
 
       <Card>
         <TextField

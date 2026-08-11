@@ -9,10 +9,12 @@ import { AmountInput } from '@/components/amount-input';
 import { Card } from '@/components/card';
 import { CategoryPicker } from '@/components/category-picker';
 import { DatePicker } from '@/components/date-picker';
+import { feedback } from '@/components/feedback';
 import { LargeButton } from '@/components/large-button';
-import { TextField } from '@/components/text-field';
+import { NoteField } from '@/components/note-field';
+import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useAccounts } from '@/hooks/use-accounts';
 import { useCategories } from '@/hooks/use-categories';
 import { useTheme } from '@/hooks/use-theme';
@@ -22,7 +24,14 @@ import {
   getTransaction,
   updateTransaction,
 } from '@/db/transaction-repo';
-import type { TransactionType } from '@/types';
+import type { AttachmentMeta, TransactionType } from '@/types';
+import {
+  accountProjectedBalance,
+  accountWouldOverdraft,
+  buildOverdraftMessage,
+  type LedgerFlow,
+} from '@/utils/account-balance';
+import { removeAttachmentFiles } from '@/utils/attachments';
 import { confirmDelete } from '@/utils/confirm';
 import { todayISODate } from '@/utils/format';
 
@@ -30,22 +39,29 @@ type TransactionFormProps = {
   type: TransactionType;
   /** When set, loads this transaction for editing instead of recording a new one. */
   editingId?: number;
+  /** Pre-fills the date for new entries (e.g. opening a form for a past day). */
+  defaultDate?: string;
 };
 
-export function TransactionForm({ type, editingId }: TransactionFormProps) {
+export function TransactionForm({ type, editingId, defaultDate }: TransactionFormProps) {
   const theme = useTheme();
   const isIncome = type === 'income';
 
-  const { accounts } = useAccounts();
+  const { accounts, balances } = useAccounts();
   const { categories } = useCategories(type);
 
   const [amount, setAmount] = useState('');
   const [accountId, setAccountId] = useState<number | null>(null);
   const [categoryId, setCategoryId] = useState<number | null>(null);
   const [note, setNote] = useState('');
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [saving, setSaving] = useState(false);
-  // Date state - defaults to today for new entries, preserves original for edit
-  const [date, setDate] = useState(todayISODate());
+  // Original amount in edit mode — the current account balance already includes
+  // it, so the overdraft projection must add it back before applying the change.
+  const [originalAmount, setOriginalAmount] = useState<number | null>(null);
+  // Date state - defaults to `defaultDate` (or today) for new entries,
+  // preserves the original date in edit mode (the load effect overwrites it).
+  const [date, setDate] = useState(defaultDate ?? todayISODate());
   const [loading, setLoading] = useState(Boolean(editingId));
 
   // In edit mode, prefill the form from the existing transaction.
@@ -70,10 +86,12 @@ export function TransactionForm({ type, editingId }: TransactionFormProps) {
           return;
         }
         setAmount(String(row.amount));
+        setOriginalAmount(row.amount);
         setAccountId(row.accountId);
         setCategoryId(row.categoryId);
         setNote(row.note);
         setDate(row.date);
+        setAttachments(row.attachments ?? []);
         setLoading(false);
       })
       .catch(() => {
@@ -101,14 +119,13 @@ export function TransactionForm({ type, editingId }: TransactionFormProps) {
   const accent = isIncome ? theme.income : theme.expense;
   const Icon = isIncome ? TrendingUp : TrendingDown;
   const title = editingId
-    ? `Edit ${isIncome ? 'Income' : 'Expense'}`
-    : `Add ${isIncome ? 'Income' : 'Expense'}`;
+    ? `Edit ${isIncome ? 'Deposit' : 'Withdraw'}`
+    : `Add ${isIncome ? 'Deposit' : 'Withdraw'}`;
 
   const canSave = amount !== '' && parseFloat(amount) > 0 && accountId !== null && categoryId !== null && !saving;
 
-  const handleSave = async () => {
-    const numeric = parseFloat(amount);
-    if (!(numeric > 0) || accountId === null || categoryId === null) {
+  const save = async (numeric: number) => {
+    if (accountId === null) {
       return;
     }
     setSaving(true);
@@ -120,6 +137,7 @@ export function TransactionForm({ type, editingId }: TransactionFormProps) {
         categoryId,
         note: note.trim(),
         date,
+        attachments,
       };
       if (editingId) {
         await updateTransaction(editingId, input);
@@ -133,6 +151,33 @@ export function TransactionForm({ type, editingId }: TransactionFormProps) {
     }
   };
 
+  const handleSave = async () => {
+    const numeric = parseFloat(amount);
+    if (!(numeric > 0) || accountId === null || categoryId === null) {
+      return;
+    }
+    const flow: LedgerFlow = type === 'expense' ? 'out' : 'in';
+    const revert = editingId && originalAmount !== null ? { flow, amount: originalAmount } : null;
+    if (accountWouldOverdraft(balances, accountId, flow, numeric, revert)) {
+      const account = balances.find((b) => b.id === accountId);
+      feedback.confirm({
+        title: 'Balance will go negative',
+        message: buildOverdraftMessage(
+          account?.name ?? 'account',
+          numeric,
+          flow,
+          account?.balance ?? 0,
+          accountProjectedBalance(balances, accountId, flow, numeric, revert) ?? 0
+        ),
+        danger: true,
+        confirmLabel: 'Save anyway',
+        onConfirm: () => void save(numeric),
+      });
+      return;
+    }
+    await save(numeric);
+  };
+
   const handleDelete = async () => {
     if (!editingId) {
       return;
@@ -140,6 +185,8 @@ export function TransactionForm({ type, editingId }: TransactionFormProps) {
     setSaving(true);
     try {
       await deleteTransaction(editingId);
+      // Best-effort cleanup of the stored files — a stale file is harmless.
+      await removeAttachmentFiles(attachments);
       router.back();
     } finally {
       setSaving(false);
@@ -152,14 +199,14 @@ export function TransactionForm({ type, editingId }: TransactionFormProps) {
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.header}>
-        <View style={[styles.headerIcon, { backgroundColor: isIncome ? theme.incomeSoft : theme.expenseSoft }]}>
-          <Icon size={28} color={accent} />
-        </View>
-        <ThemedText type="subtitle" style={[styles.title, { color: accent }]}>
-          {title}
-        </ThemedText>
-      </View>
+      <ScreenHeader
+        title={title}
+        leading={
+          <View style={[styles.headerIcon, { backgroundColor: isIncome ? theme.incomeSoft : theme.expenseSoft }]}>
+            <Icon size={28} color={accent} />
+          </View>
+        }
+      />
 
       <Card style={styles.card}>
         <ThemedText type="smallBold" themeColor="textSecondary">
@@ -181,6 +228,16 @@ export function TransactionForm({ type, editingId }: TransactionFormProps) {
         </ThemedText>
         <CategoryPicker categories={categories} selectedId={categoryId} onSelect={setCategoryId} />
       </Card>
+      <Card style={styles.card}>
+        <NoteField
+          value={note}
+          onChangeText={setNote}
+          placeholder="e.g. vegetables, bus fare…"
+          accessibilityLabel="Note"
+          attachments={attachments}
+          onChangeAttachments={setAttachments}
+        />
+      </Card>
 
       <Card style={styles.card}>
         <DatePicker
@@ -189,16 +246,6 @@ export function TransactionForm({ type, editingId }: TransactionFormProps) {
           onChange={setDate}
           maxDate={todayISODate()}
           accessibilityLabel="Transaction date"
-        />
-      </Card>
-
-      <Card style={styles.card}>
-        <TextField
-          label="Note (optional)"
-          value={note}
-          onChangeText={setNote}
-          placeholder="e.g. vegetables, bus fare…"
-          accessibilityLabel="Note"
         />
       </Card>
 
@@ -226,7 +273,7 @@ export function TransactionForm({ type, editingId }: TransactionFormProps) {
       ) : (
         <>
           <LargeButton
-            title={isIncome ? 'Save Income' : 'Save Expense'}
+            title={isIncome ? 'Save Deposit' : 'Save Withdraw'}
             variant={type}
             icon={Icon}
             onPress={handleSave}
@@ -244,21 +291,12 @@ const styles = StyleSheet.create({
   wrap: {
     gap: Spacing.three,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-  },
   headerIcon: {
     width: 52,
     height: 52,
-    borderRadius: 16,
+    borderRadius: Radius.button,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  title: {
-    fontSize: 28,
-    lineHeight: 34,
   },
   loading: {
     marginTop: Spacing.six,

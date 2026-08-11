@@ -10,7 +10,7 @@ import { useTheme } from '@/hooks/use-theme';
 /** Route → tab title/icon, kept in one place so renames are a one-liner. */
 const TAB_META: SidebarItem[] = [
   { name: 'index', title: 'Home', Icon: Home },
-  { name: 'history', title: 'History', Icon: History },
+  { name: 'history', title: 'Cashbook', Icon: History },
   { name: 'khata', title: 'Khata', Icon: BookOpen },
   { name: 'reports', title: 'Reports', Icon: BarChart3 },
   { name: 'settings', title: 'Settings', Icon: Settings },

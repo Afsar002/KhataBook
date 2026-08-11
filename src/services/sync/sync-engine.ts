@@ -36,7 +36,7 @@ import { getDeviceName } from '@/services/device/device-name';
 import { getCurrentSession } from '@/services/supabase/auth';
 import { getSupabaseClient } from '@/services/supabase/client';
 import { isSyncConfigured } from '@/services/supabase/config';
-import { onQueueChange, onRemoteChange } from '@/services/sync/events';
+import { emitSyncResult, onQueueChange, onRemoteChange } from '@/services/sync/events';
 import { startRealtime, stopRealtime } from '@/services/sync/realtime';
 import type { SyncStatus } from '@/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -257,6 +257,8 @@ async function runSync(
       failed: pushResult.failed,
       conflicts: pullResult.conflicts ?? 0,
     };
+    // Let listeners (e.g. sync-outcome notifications) react to the finished run.
+    emitSyncResult(lastResult);
 
     if (pushResult.failed === 0) {
       // Stamp this device's name into the synced settings so other devices

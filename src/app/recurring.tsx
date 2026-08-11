@@ -5,11 +5,13 @@ import { router } from 'expo-router';
 import { Plus, Calendar, Trash2, Edit, ToggleLeft, ToggleRight, Info } from 'lucide-react-native';
 import { useEffect, useState, useCallback } from 'react';
 import { StyleSheet, View, RefreshControl, Pressable, ScrollView } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card } from '@/components/card';
+import { EmptyState } from '@/components/empty-state';
 import { feedback } from '@/components/feedback';
 import { LargeButton } from '@/components/large-button';
+import { Screen } from '@/components/screen';
+import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -34,13 +36,12 @@ const TRANSACTION_TYPE_LABELS = {
 };
 
 const PARTY_DIRECTION_LABELS = {
-  in: 'Receive / Pay',
-  out: 'Give / Take',
+  in: 'In / Pay',
+  out: 'Out / Take',
 };
 
 export default function RecurringTemplatesScreen() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const [templates, setTemplates] = useState<RecurringTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -154,15 +155,18 @@ export default function RecurringTemplatesScreen() {
     return (
       <Card key={template.id} style={styles.card}>
         <View style={styles.row}>
-          <View style={styles.iconWrapper}>
+          <View style={[styles.iconWrapper, { backgroundColor: theme.backgroundElement }]}>
             <Calendar size={22} color={template.isActive ? theme.income : theme.textSecondary} />
           </View>
-          <View style={[styles.info, { flex: 1 }]} >
+          <View style={styles.info}>
             <View style={styles.headerRow}>
               <ThemedText type="default" numberOfLines={1}>
                 {template.note || 'Unnamed template'}
               </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" style={styles.badge}>
+              <ThemedText
+                type="small"
+                themeColor="textSecondary"
+                style={[styles.badge, { backgroundColor: theme.backgroundElement }]}>
                 {TYPE_LABELS[template.templateType]}
               </ThemedText>
             </View>
@@ -170,7 +174,7 @@ export default function RecurringTemplatesScreen() {
               <ThemedText type="small" themeColor="textSecondary">
                 {typeLabel} • {FREQUENCY_LABELS[template.frequency]}
               </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" style={{ marginLeft: Spacing.two }}>
+              <ThemedText type="small" themeColor="textSecondary">
                 {isTransaction ? `₹${template.amount.toLocaleString('en-IN')}` : `₹${template.amount.toLocaleString('en-IN')}`}
               </ThemedText>
             </View>
@@ -180,7 +184,7 @@ export default function RecurringTemplatesScreen() {
                 {template.endDate ? ` to ${template.endDate}` : ' (no end)'}
               </ThemedText>
               {template.lastGeneratedDate && (
-                <ThemedText type="small" themeColor="textSecondary" style={{ marginLeft: Spacing.two }}>
+                <ThemedText type="small" themeColor="textSecondary">
                   Last: {template.lastGeneratedDate}
                 </ThemedText>
               )}
@@ -215,76 +219,65 @@ export default function RecurringTemplatesScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <ThemedText type="title">Recurring Templates</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
-          Automatic entries on schedule
-        </ThemedText>
-      </View>
+    <Screen scroll={false}>
+      <View style={styles.container}>
+        <ScreenHeader title="Recurring Templates" subtitle="Automatic entries on schedule" />
 
-      <View style={styles.toolbar}>
+        <View style={styles.toolbar}>
+          <LargeButton
+            title="Generate Today"
+            subtitle="Run now"
+            icon={Calendar}
+            variant="outline"
+            onPress={handleGenerateToday}
+            height={44}
+            style={styles.toolbarButton}
+          />
+          <LargeButton
+            title="Catch Up"
+            subtitle="Missed dates"
+            icon={Info}
+            variant="outline"
+            onPress={handleCatchUp}
+            height={44}
+            style={styles.toolbarButton}
+          />
+        </View>
+
+        <ScrollView
+          style={styles.list}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.primary]} />
+          }
+        >
+          {templates.length === 0 ? (
+            <EmptyState
+              icon={Calendar}
+              title="No recurring templates yet"
+              message="Tap + to create your first template"
+            />
+          ) : (
+            templates.map(renderTemplate)
+          )}
+        </ScrollView>
+
         <LargeButton
-          title="Generate Today"
-          subtitle="Run now"
-          icon={Calendar}
-          variant="outline"
-          onPress={handleGenerateToday}
-          height={44}
-          style={styles.toolbarButton}
-        />
-        <LargeButton
-          title="Catch Up"
-          subtitle="Missed dates"
-          icon={Info}
-          variant="outline"
-          onPress={handleCatchUp}
-          height={44}
-          style={styles.toolbarButton}
+          title="Add Template"
+          icon={Plus}
+          variant="primary"
+          onPress={() => router.push('/recurring/new')}
         />
       </View>
-
-      <ScrollView
-        style={styles.list}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[theme.primary]} />
-        }
-      >
-        {templates.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Calendar size={48} color={theme.textSecondary} style={styles.emptyIcon} />
-            <ThemedText type="default" themeColor="textSecondary" style={styles.emptyText}>
-              No recurring templates yet
-            </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.emptyHint}>
-              Tap + to create your first template
-            </ThemedText>
-          </View>
-        ) : (
-          templates.map(renderTemplate)
-        )}
-      </ScrollView>
-
-      <LargeButton
-        title="Add Template"
-        icon={Plus}
-        variant="primary"
-        onPress={() => router.push('/recurring/new')}
-        style={styles.fab}
-      />
-      <View style={{ height: insets.bottom }} />
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: Spacing.four,
+    width: '100%',
+    padding: Spacing.three,
     gap: Spacing.three,
-  },
-  header: {
-    gap: 2,
   },
   toolbar: {
     flexDirection: 'row',
@@ -296,7 +289,6 @@ const styles = StyleSheet.create({
   list: {
     flex: 1,
     gap: Spacing.two,
-    paddingBottom: Spacing.four + 60, // Space for FAB
   },
   card: {
     padding: Spacing.three,
@@ -310,13 +302,12 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: Radius.input,
-    backgroundColor: 'rgba(0,0,0,0.04)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   info: {
     flex: 1,
-    gap: 4,
+    gap: Spacing.one,
   },
   headerRow: {
     flexDirection: 'row',
@@ -325,13 +316,13 @@ const styles = StyleSheet.create({
   },
   badge: {
     paddingHorizontal: Spacing.two,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: 'rgba(0,0,0,0.06)',
+    paddingVertical: Spacing.half,
+    borderRadius: Radius.chip,
   },
   detailsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: Spacing.two,
   },
   datesRow: {
     flexDirection: 'row',
@@ -345,25 +336,6 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     padding: Spacing.one,
-  },
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.four,
-  },
-  emptyIcon: {
-    opacity: 0.5,
-  },
-  emptyText: {
-    textAlign: 'center',
-  },
-  emptyHint: {
-    textAlign: 'center',
-  },
-  fab: {
-    // Position handled by list paddingBottom
   },
   loadingContainer: {
     flex: 1,

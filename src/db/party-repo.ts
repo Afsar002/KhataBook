@@ -22,8 +22,10 @@ import type {
   PartyTransaction,
   PartyType,
 } from '@/types';
-import { monthBounds } from '@/utils/format';
+import { monthBounds, nowTime } from '@/utils/format';
 import { likeParam, SEARCH_LIMIT } from '@/utils/search';
+import { calculateKhataSummary } from '@/utils/balance';
+import { safeParseAttachments } from '@/utils/attachments';
 import { uuid } from '@/utils/uuid';
 
 export interface NewParty {
@@ -387,8 +389,9 @@ export async function addPartyTransaction(tx: NewPartyTransaction): Promise<numb
   const now = nowIso();
   const userId = getCurrentUserId();
   const kind = tx.kind ?? 'normal';
+  const time = tx.time ?? nowTime();
   const result = await db.runAsync(
-    'INSERT INTO party_transactions (uuid, user_id, updated_at, party_id, direction, amount, note, date, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO party_transactions (uuid, user_id, updated_at, party_id, direction, amount, note, date, time, kind, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     recordUuid,
     userId,
     now,
@@ -397,7 +400,9 @@ export async function addPartyTransaction(tx: NewPartyTransaction): Promise<numb
     tx.amount,
     tx.note,
     tx.date,
-    kind
+    time,
+    kind,
+    JSON.stringify(tx.attachments ?? [])
   );
   await enqueueChange(db, {
     table: 'party_transactions',
@@ -411,14 +416,20 @@ export async function addPartyTransaction(tx: NewPartyTransaction): Promise<numb
 /** Loads a single khata entry for editing. */
 export async function getPartyTransaction(id: number): Promise<PartyTransaction | null> {
   const db = getDatabase();
-  return db.getFirstAsync<PartyTransaction>(
+  const row = await db.getFirstAsync<PartyTransaction & { attachmentsRaw?: string | null }>(
     `
-    SELECT id, party_id AS partyId, direction, amount, note, date, created_at AS createdAt, kind
+    SELECT id, party_id AS partyId, direction, amount, note, date, time, created_at AS createdAt, kind,
+           attachments AS attachmentsRaw
     FROM party_transactions
     WHERE id = ?
     `,
     id
   );
+  if (!row) {
+    return null;
+  }
+  const { attachmentsRaw, ...rest } = row;
+  return { ...rest, attachments: safeParseAttachments(attachmentsRaw) };
 }
 
 export async function updatePartyTransaction(
@@ -440,7 +451,7 @@ export async function updatePartyTransaction(
     }
     const kind = input.kind ?? 'normal';
     await db.runAsync(
-      'UPDATE party_transactions SET updated_at = ?, party_id = ?, direction = ?, amount = ?, note = ?, date = ?, kind = ? WHERE id = ?',
+      'UPDATE party_transactions SET updated_at = ?, party_id = ?, direction = ?, amount = ?, note = ?, date = ?, kind = ?, attachments = ? WHERE id = ?',
       nowIso(),
       input.partyId,
       input.direction,
@@ -448,6 +459,7 @@ export async function updatePartyTransaction(
       input.note,
       input.date,
       kind,
+      JSON.stringify(input.attachments ?? []),
       id
     );
     if (row?.uuid) {
@@ -482,17 +494,32 @@ export async function deletePartyTransaction(id: number): Promise<void> {
   });
 }
 
+/** Raw party ledger row as returned by SQL, with the attachments JSON exposed. */
+type PartyTransactionRaw = PartyTransaction & { attachmentsRaw?: string | null };
+
+/**
+ * Maps a raw ledger row, converting the stored attachments JSON into the cheap
+ * `hasAttachments` flag. The full metadata stays out of list rows — the edit
+ * form loads it separately via `getPartyTransaction`.
+ */
+function toPartyTransactionRow(raw: PartyTransactionRaw): PartyTransaction {
+  const { attachmentsRaw, ...rest } = raw;
+  return { ...rest, hasAttachments: safeParseAttachments(attachmentsRaw).length > 0 };
+}
+
 export async function listPartyTransactions(partyId: number): Promise<PartyTransaction[]> {
   const db = getDatabase();
-  return db.getAllAsync<PartyTransaction>(
+  const rows = await db.getAllAsync<PartyTransactionRaw>(
     `
-    SELECT id, party_id AS partyId, direction, amount, note, date, created_at AS createdAt, kind
+    SELECT id, party_id AS partyId, direction, amount, note, date, time, created_at AS createdAt, kind,
+           attachments AS attachmentsRaw
     FROM party_transactions
     WHERE party_id = ?
     ORDER BY date DESC, id DESC
     `,
     partyId
   );
+  return rows.map(toPartyTransactionRow);
 }
 
 /** One page of a party khata ledger (same shape as the feed pages). */
@@ -517,9 +544,10 @@ export async function listPartyLedgerPage(
   if (cursor) {
     params.push(cursor.date, cursor.date, cursor.id);
   }
-  const rows = await db.getAllAsync<PartyTransaction>(
+  const raw = await db.getAllAsync<PartyTransactionRaw>(
     `
-    SELECT id, party_id AS partyId, direction, amount, note, date, created_at AS createdAt, kind
+    SELECT id, party_id AS partyId, direction, amount, note, date, time, created_at AS createdAt, kind,
+           attachments AS attachmentsRaw
     FROM party_transactions
     WHERE party_id = ?
     ${where}
@@ -528,6 +556,7 @@ export async function listPartyLedgerPage(
     `,
     ...params
   );
+  const rows = raw.map(toPartyTransactionRow);
   const hasMore = rows.length > LEDGER_PAGE_SIZE;
   const page = hasMore ? rows.slice(0, LEDGER_PAGE_SIZE) : rows;
   const last = page[page.length - 1];
@@ -544,15 +573,17 @@ export async function listPartyLedgerPage(
  */
 export async function listPartyTransactionsAsc(partyId: number): Promise<PartyTransaction[]> {
   const db = getDatabase();
-  return db.getAllAsync<PartyTransaction>(
+  const raw = await db.getAllAsync<PartyTransactionRaw>(
     `
-    SELECT id, party_id AS partyId, direction, amount, note, date, created_at AS createdAt, kind
+    SELECT id, party_id AS partyId, direction, amount, note, date, time, created_at AS createdAt, kind,
+           attachments AS attachmentsRaw
     FROM party_transactions
     WHERE party_id = ?
     ORDER BY date ASC, id ASC
     `,
     partyId
   );
+  return raw.map(toPartyTransactionRow);
 }
 
 /**
@@ -563,18 +594,7 @@ export async function listPartyTransactionsAsc(partyId: number): Promise<PartyTr
  */
 export async function getKhataSummary(): Promise<KhataSummary> {
   const parties = await listParties();
-  let receivable = 0;
-  let payable = 0;
-  for (const party of parties) {
-    if (party.balance > 0) {
-      if (party.type === 'customer') {
-        receivable += party.balance;
-      } else {
-        payable += party.balance;
-      }
-    }
-  }
-  return { receivable, payable, net: receivable - payable };
+  return calculateKhataSummary(parties);
 }
 
 /** Money given on credit / received for a month (`YYYY-MM`). */

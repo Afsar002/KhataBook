@@ -1,10 +1,11 @@
 import { useFocusEffect } from 'expo-router';
 import { ChevronLeft, ChevronRight, FileText } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/card';
 import { CategoryIcon } from '@/components/category-icon';
+import { FitText } from '@/components/fit-text';
 import { feedback } from '@/components/feedback';
 import { LargeButton } from '@/components/large-button';
 import { Screen } from '@/components/screen';
@@ -106,7 +107,7 @@ export default function ReportsScreen() {
   const maxTotal = breakdownList[0]?.total ?? 0;
 
   return (
-    <Screen>
+    <Screen hasTabBar>
       <ThemedText type="subtitle">Reports</ThemedText>
 
       <View style={styles.monthRow}>
@@ -143,50 +144,49 @@ export default function ReportsScreen() {
               <ThemedText type="small" themeColor="textSecondary">
                 Income
               </ThemedText>
-              <Text style={[styles.summaryAmount, { color: theme.income }]} numberOfLines={1} ellipsizeMode="tail">
+              <FitText fontSize={16} style={[styles.summaryAmount, { color: theme.income }]}>
                 {formatINR(summary.income)}
-              </Text>
+              </FitText>
             </View>
             <View style={[styles.summaryColumn, styles.summaryDivider, { borderLeftColor: theme.border }]}>
               <ThemedText type="small" themeColor="textSecondary">
                 Expense
               </ThemedText>
-              <Text style={[styles.summaryAmount, { color: theme.expense }]} numberOfLines={1} ellipsizeMode="tail">
+              <FitText fontSize={16} style={[styles.summaryAmount, { color: theme.expense }]}>
                 {formatINR(summary.expense)}
-              </Text>
+              </FitText>
             </View>
             <View style={[styles.summaryColumn, styles.summaryDivider, { borderLeftColor: theme.border }]}>
               <ThemedText type="small" themeColor="textSecondary">
                 Profit
               </ThemedText>
-              <Text
+              <FitText
+                fontSize={16}
                 style={[
                   styles.summaryAmount,
                   { color: profit >= 0 ? theme.income : theme.expense },
-                ]}
-                numberOfLines={1}
-                ellipsizeMode="tail">
+                ]}>
                 {formatINR(profit)}
-              </Text>
+              </FitText>
             </View>
           </Card>
 
           <Card style={styles.summaryCard}>
             <View style={styles.summaryColumn}>
               <ThemedText type="small" themeColor="textSecondary">
-                Money Given
+                Money Out
               </ThemedText>
-              <Text style={[styles.summaryAmount, { color: theme.text }]} numberOfLines={1} ellipsizeMode="tail">
+              <FitText fontSize={16} style={[styles.summaryAmount, { color: theme.text }]}>
                 {formatINR(report.party.given)}
-              </Text>
+              </FitText>
             </View>
             <View style={[styles.summaryColumn, styles.summaryDivider, { borderLeftColor: theme.border }]}>
               <ThemedText type="small" themeColor="textSecondary">
-                Money Received
+                Money In
               </ThemedText>
-              <Text style={[styles.summaryAmount, { color: theme.text }]} numberOfLines={1} ellipsizeMode="tail">
+              <FitText fontSize={16} style={[styles.summaryAmount, { color: theme.text }]}>
                 {formatINR(report.party.received)}
-              </Text>
+              </FitText>
             </View>
           </Card>
 
@@ -195,17 +195,17 @@ export default function ReportsScreen() {
               <ThemedText type="small" themeColor="textSecondary">
                 Cash
               </ThemedText>
-              <Text style={[styles.summaryAmount, { color: theme.income }]} numberOfLines={1} ellipsizeMode="tail">
+              <FitText fontSize={16} style={[styles.summaryAmount, { color: theme.income }]}>
                 {formatINR(cashBalance)}
-              </Text>
+              </FitText>
             </View>
             <View style={[styles.summaryColumn, styles.summaryDivider, { borderLeftColor: theme.border }]}>
               <ThemedText type="small" themeColor="textSecondary">
                 Bank
               </ThemedText>
-              <Text style={[styles.summaryAmount, { color: theme.income }]} numberOfLines={1} ellipsizeMode="tail">
+              <FitText fontSize={16} style={[styles.summaryAmount, { color: theme.income }]}>
                 {formatINR(bankBalance)}
-              </Text>
+              </FitText>
             </View>
           </Card>
 
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
   },
   summaryAmount: {
     fontFamily: InterFonts.bold,
-    fontSize: 18,
+    fontSize: 16,
   },
   breakdownCard: {
     gap: Spacing.two,

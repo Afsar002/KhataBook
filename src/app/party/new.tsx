@@ -6,8 +6,8 @@ import { Card } from '@/components/card';
 import { ContactPickerButton } from '@/components/contact-picker-button';
 import { LargeButton } from '@/components/large-button';
 import { Screen } from '@/components/screen';
+import { ScreenHeader } from '@/components/screen-header';
 import { TextField } from '@/components/text-field';
-import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useParties } from '@/hooks/use-parties';
 import type { PartyType } from '@/types';
@@ -43,7 +43,7 @@ export default function NewPartyScreen() {
 
   return (
     <Screen>
-      <ThemedText type="subtitle">{isCustomer ? 'Add Customer' : 'Add Supplier'}</ThemedText>
+      <ScreenHeader title={isCustomer ? 'Add Customer' : 'Add Supplier'} />
 
       <Card style={styles.card}>
         <TextField

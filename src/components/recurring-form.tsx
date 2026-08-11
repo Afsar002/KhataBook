@@ -7,11 +7,8 @@
  * an `onSubmit` that persists to the DB.
  */
 
-import { router } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AccountPicker } from '@/components/account-picker';
 import { AmountInput } from '@/components/amount-input';
@@ -20,6 +17,8 @@ import { CategoryPicker } from '@/components/category-picker';
 import { feedback } from '@/components/feedback';
 import { LargeButton } from '@/components/large-button';
 import { PartyPicker } from '@/components/party-picker';
+import { Screen } from '@/components/screen';
+import { ScreenHeader } from '@/components/screen-header';
 import { Segment } from '@/components/segment';
 import { TextField } from '@/components/text-field';
 import { ThemedText } from '@/components/themed-text';
@@ -108,7 +107,6 @@ export function RecurringForm({
   onSubmit,
 }: RecurringFormProps) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { accounts } = useAccounts();
 
   const init = { ...DEFAULT_VALUES, ...initialValues };
@@ -227,19 +225,8 @@ export function RecurringForm({
   const dayOfWeekLabel = (day: number) => WEEK_DAYS[day] ?? '';
 
   return (
-    <ScrollView
-      style={styles.scrollView}
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled">
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton} accessibilityLabel="Back">
-          <ArrowLeft size={24} color={theme.text} />
-        </Pressable>
-        <ThemedText type="title" style={styles.title}>
-          {title}
-        </ThemedText>
-        <View style={{ width: 44 }} />
-      </View>
+    <Screen>
+      <ScreenHeader title={title} />
 
       {/* Template Type */}
       <Card style={styles.card}>
@@ -353,18 +340,27 @@ export function RecurringForm({
               Day of Week
             </ThemedText>
             <View style={styles.dayButtons}>
-              {[0, 1, 2, 3, 4, 5, 6].map((day) => (
-                <Pressable
-                  key={day}
-                  onPress={() => setDayOfWeek(day)}
-                  style={[styles.dayButton, dayOfWeek === day ? styles.dayButtonActive : null]}>
-                  <ThemedText
-                    type="smallBold"
-                    themeColor={dayOfWeek === day ? 'background' : 'text'}>
-                    {dayOfWeekLabel(day).slice(0, 3)}
-                  </ThemedText>
-                </Pressable>
-              ))}
+              {[0, 1, 2, 3, 4, 5, 6].map((day) => {
+                const selected = dayOfWeek === day;
+                return (
+                  <Pressable
+                    key={day}
+                    onPress={() => setDayOfWeek(day)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={({ pressed }) => [
+                      styles.dayButton,
+                      { backgroundColor: selected ? theme.primary : theme.backgroundElement },
+                      pressed && styles.pressed,
+                    ]}>
+                    <ThemedText
+                      type="smallBold"
+                      style={[styles.dayLabel, { color: selected ? '#FFFFFF' : theme.text }]}>
+                      {dayOfWeekLabel(day).slice(0, 3)}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
             </View>
           </View>
         )}
@@ -375,18 +371,27 @@ export function RecurringForm({
               Day of Month
             </ThemedText>
             <View style={styles.dayButtons}>
-              {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                <Pressable
-                  key={day}
-                  onPress={() => setDayOfMonth(day)}
-                  style={[styles.dayButton, dayOfMonth === day ? styles.dayButtonActive : null]}>
-                  <ThemedText
-                    type="smallBold"
-                    themeColor={dayOfMonth === day ? 'background' : 'text'}>
-                    {day}
-                  </ThemedText>
-                </Pressable>
-              ))}
+              {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
+                const selected = dayOfMonth === day;
+                return (
+                  <Pressable
+                    key={day}
+                    onPress={() => setDayOfMonth(day)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={({ pressed }) => [
+                      styles.dayButton,
+                      { backgroundColor: selected ? theme.primary : theme.backgroundElement },
+                      pressed && styles.pressed,
+                    ]}>
+                    <ThemedText
+                      type="smallBold"
+                      style={[styles.dayLabel, { color: selected ? '#FFFFFF' : theme.text }]}>
+                      {day}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
             </View>
             <ThemedText type="small" themeColor="textSecondary" style={styles.helpText}>
               Use 28-31 for end-of-month (will skip in shorter months)
@@ -456,36 +461,12 @@ export function RecurringForm({
         variant="primary"
         onPress={handleSave}
         disabled={!canSave}
-        style={styles.saveButton}
       />
-      <View style={{ height: insets.bottom }} />
-    </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollView: {
-    flex: 1,
-    backgroundColor: 'transparent',
-  },
-  content: {
-    padding: Spacing.four,
-    gap: Spacing.three,
-    paddingBottom: Spacing.four + 60,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.two,
-  },
-  backButton: {
-    padding: Spacing.one,
-  },
-  title: {
-    textAlign: 'center',
-    flex: 1,
-  },
   card: {
     gap: Spacing.two,
   },
@@ -515,15 +496,14 @@ const styles = StyleSheet.create({
   dayButton: {
     width: 40,
     height: 40,
-    borderRadius: Radius.input,
-    backgroundColor: 'rgba(0,0,0,0.04)',
+    borderRadius: Radius.button,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dayButtonActive: {
-    backgroundColor: '#16a34a', // Green for active
+  dayLabel: {
+    textAlign: 'center',
   },
-  saveButton: {
-    // Position handled by content paddingBottom
+  pressed: {
+    opacity: 0.85,
   },
 });

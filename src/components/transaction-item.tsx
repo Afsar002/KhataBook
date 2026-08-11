@@ -1,22 +1,26 @@
 /** A single row in a ledger list: income, expense, or a transfer. */
 import { memo } from 'react';
-import { ArrowLeftRight, TrendingDown, TrendingUp } from 'lucide-react-native';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ArrowLeftRight, Paperclip, TrendingDown, TrendingUp } from 'lucide-react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { CategoryIcon } from '@/components/category-icon';
+import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { LedgerRow } from '@/types';
-import { formatINR } from '@/utils/format';
+import { formatINR, formatISOToDisplay, formatTimeOfDay } from '@/utils/format';
 import { impact } from '@/utils/haptics';
 
 type TransactionItemProps = {
   item: LedgerRow;
   onPress?: (item: LedgerRow) => void;
   onLongPress?: (item: LedgerRow) => void;
+  /** Show the transaction date under the amount. Defaults to true (History
+   *  already groups rows by date, so it opts out). */
+  showDate?: boolean;
 };
 
-function TransactionItemRow({ item, onPress, onLongPress }: TransactionItemProps) {
+function TransactionItemRow({ item, onPress, onLongPress, showDate = true }: TransactionItemProps) {
   const theme = useTheme();
   const isTransfer = item.kind === 'transfer';
   const isOpening = item.entryKind === 'opening';
@@ -78,20 +82,47 @@ function TransactionItemRow({ item, onPress, onLongPress }: TransactionItemProps
       </View>
 
       <View style={styles.middle}>
-        <Text style={[styles.title, { color: theme.text }]} numberOfLines={1}>
+        <ThemedText style={styles.title} numberOfLines={1}>
           {title}
-        </Text>
+        </ThemedText>
         {subtitle ? (
-          <Text style={[styles.subtitle, { color: theme.textSecondary }]} numberOfLines={1}>
+          <ThemedText themeColor="textSecondary" style={styles.subtitle} numberOfLines={1}>
             {subtitle}
-          </Text>
+          </ThemedText>
         ) : null}
       </View>
 
-      <Text style={[styles.amount, { color: amountColor }]}>
-        {sign}
-        {formatINR(item.amount)}
-      </Text>
+      <View style={styles.amountWrap}>
+        <ThemedText
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+          style={[styles.amount, { color: amountColor }]}>
+          {sign}
+          {formatINR(item.amount)}
+        </ThemedText>
+        {showDate ? (
+          <View style={styles.dateWrap}>
+            <ThemedText themeColor="textSecondary" style={styles.date} numberOfLines={1}>
+              {formatISOToDisplay(item.date)}
+              {item.time ? ` · ${formatTimeOfDay(item.time)}` : ''}
+            </ThemedText>
+            {item.hasAttachments ? (
+              <Paperclip size={11} color={theme.textSecondary} />
+            ) : null}
+          </View>
+        ) : item.time ? (
+          // History groups rows by day, so just the time is enough there.
+          <View style={styles.dateWrap}>
+            <ThemedText themeColor="textSecondary" style={styles.date} numberOfLines={1}>
+              {formatTimeOfDay(item.time)}
+            </ThemedText>
+            {item.hasAttachments ? (
+              <Paperclip size={11} color={theme.textSecondary} />
+            ) : null}
+          </View>
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -129,6 +160,23 @@ const styles = StyleSheet.create({
   amount: {
     fontFamily: InterFonts.semibold,
     fontSize: 18,
+  },
+  amountWrap: {
+    alignItems: 'flex-end',
+    // Let the amount column compress (and the text shrink/truncate) instead of
+    // bleeding past the card's right edge when the figure is very large.
+    flexShrink: 1,
+  },
+  date: {
+    fontFamily: InterFonts.regular,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  dateWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    justifyContent: 'flex-end',
   },
 });
 

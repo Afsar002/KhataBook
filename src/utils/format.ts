@@ -37,6 +37,35 @@ export function todayISODate(): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Current local time as `HH:MM` (24-hour), auto-recorded with new entries.
+ * Built manually so it's stable across platforms (no ICU quirks).
+ */
+export function nowTime(): string {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * `HH:MM` (24-hour) → "4:30 PM" (12-hour). Returns `''` for empty or invalid
+ * input so callers can hide the time suffix. Manual formatting avoids the
+ * Android ICU U+202F spacing bug that affects `toLocaleString`.
+ */
+export function formatTimeOfDay(hhmm: string): string {
+  if (!hhmm) {
+    return '';
+  }
+  const [hStr, mStr] = hhmm.split(':');
+  const h = Number(hStr);
+  const m = Number(mStr);
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    return '';
+  }
+  const period = h < 12 ? 'AM' : 'PM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 /** `YYYY-MM-DD` → human label: "Today", "Yesterday", or "Mon, 4 Aug". */
 export function formatDateLabel(iso: string): string {
   const today = todayISODate();
@@ -117,6 +146,42 @@ export function formatISOToDisplay(iso: string): string {
     return iso || '—';
   }
   return normalizeSpaces(d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }));
+}
+
+/** `YYYY-MM-DD` → "11 Aug" (day + short month, no year). */
+export function formatDayMonth(iso: string): string {
+  const d = parseISODate(iso);
+  if (Number.isNaN(d.getTime())) {
+    return iso;
+  }
+  return normalizeSpaces(d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }));
+}
+
+/** `YYYY-MM-DD` → "Sat, 01 Aug 26" (weekday, day, month, 2-digit year). */
+export function formatRangeDate(iso: string): string {
+  const d = parseISODate(iso);
+  if (Number.isNaN(d.getTime())) {
+    return iso;
+  }
+  return normalizeSpaces(
+    d.toLocaleDateString('en-IN', {
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      year: '2-digit',
+    })
+  );
+}
+
+/** `YYYY-MM-DD` → "11 Aug 2026" (day, short month, full year). */
+export function formatLongDate(iso: string): string {
+  const d = parseISODate(iso);
+  if (Number.isNaN(d.getTime())) {
+    return iso;
+  }
+  return normalizeSpaces(
+    d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  );
 }
 
 /** Format an ISO datetime to "04 Aug 2026, 4:30 PM" (report "generated" line). */

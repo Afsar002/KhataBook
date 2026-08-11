@@ -31,9 +31,6 @@ interface Step {
   icon: typeof Store;
   title: string;
   text: string;
-  /** A second tint used for the icon bubble background. */
-  soft: string;
-  accent: string;
 }
 
 const STEPS: Step[] = [
@@ -41,36 +38,26 @@ const STEPS: Step[] = [
     icon: Store,
     title: 'Welcome to DailyKhata',
     text: "Your shop's accounts, kept simply. Track every rupee — income, expense, credit and cash — even without internet.",
-    soft: '#E7F6EC',
-    accent: '#16A34A',
   },
   {
     icon: Wallet,
     title: 'Record money in & out',
     text: 'Tap the + button on the Home screen to add income or expense. Pick an account, a category and a note — done in seconds.',
-    soft: '#E7F6EC',
-    accent: '#16A34A',
   },
   {
     icon: Users,
-    title: 'Track credit given',
-    text: 'Add customers and suppliers, then record Give / Receive (or Take / Pay). Each khata balance updates automatically.',
-    soft: '#E7F6EC',
-    accent: '#16A34A',
+    title: 'Track credit out',
+    text: 'Add customers and suppliers, then record Out / In (or Take / Pay). Each khata balance updates automatically.',
   },
   {
     icon: Scale,
     title: 'Reconcile your cash',
     text: 'Count the cash in hand at closing time. The Cash Book compares it with what the books expect, so nothing slips away.',
-    soft: '#E7F6EC',
-    accent: '#16A34A',
   },
   {
     icon: Cloud,
     title: 'Optional cloud sync',
     text: 'Sign in from Settings to keep your data safe and stay in sync across phones. Works fully offline too.',
-    soft: '#E7F6EC',
-    accent: '#16A34A',
   },
 ];
 
@@ -132,8 +119,8 @@ export default function OnboardingScreen({ onDone }: OnboardingScreenProps) {
           const Icon = step.icon;
           return (
             <View key={step.title} style={[styles.page, { width: viewportWidth }]}>
-              <View style={[styles.iconBubble, { backgroundColor: step.soft }]}>
-                <Icon size={44} color={step.accent} />
+              <View style={[styles.iconBubble, { backgroundColor: theme.incomeSoft }]}>
+                <Icon size={44} color={theme.income} />
               </View>
               <ThemedText type="title" style={styles.stepTitle}>
                 {step.title}

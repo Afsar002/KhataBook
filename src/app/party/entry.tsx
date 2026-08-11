@@ -2,7 +2,7 @@ import { useLocalSearchParams } from 'expo-router';
 
 import { PartyEntryForm } from '@/components/party-entry-form';
 import { Screen } from '@/components/screen';
-import { ThemedText } from '@/components/themed-text';
+import { ScreenHeader } from '@/components/screen-header';
 import { useParty } from '@/hooks/use-party';
 import type { PartyAction, PartyType } from '@/types';
 
@@ -25,12 +25,7 @@ export default function PartyEntryScreen() {
 
   return (
     <Screen>
-      <ThemedText type="subtitle">{editingId ? 'Edit entry' : 'Record entry'}</ThemedText>
-      {party ? (
-        <ThemedText type="small" themeColor="textSecondary">
-          {party.name}
-        </ThemedText>
-      ) : null}
+      <ScreenHeader title={editingId ? 'Edit entry' : 'Record entry'} subtitle={party?.name} />
       <PartyEntryForm
         partyId={partyId}
         partyType={partyType}

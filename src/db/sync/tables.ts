@@ -24,17 +24,17 @@ export const SYNC_TABLES: SyncTableSpec[] = [
   { table: 'parties', columns: ['name', 'type', 'phone', 'opening_balance'], fks: {} },
   {
     table: 'transactions',
-    columns: ['type', 'amount', 'account_id', 'category_id', 'note', 'date', 'kind'],
+    columns: ['type', 'amount', 'account_id', 'category_id', 'note', 'date', 'time', 'kind', 'attachments'],
     fks: { account_id: 'accounts', category_id: 'categories' },
   },
   {
     table: 'transfers',
-    columns: ['from_account_id', 'to_account_id', 'amount', 'note', 'date'],
+    columns: ['from_account_id', 'to_account_id', 'amount', 'note', 'date', 'time'],
     fks: { from_account_id: 'accounts', to_account_id: 'accounts' },
   },
   {
     table: 'party_transactions',
-    columns: ['party_id', 'direction', 'amount', 'note', 'date', 'kind'],
+    columns: ['party_id', 'direction', 'amount', 'note', 'date', 'time', 'kind', 'attachments'],
     fks: { party_id: 'parties' },
   },
   { table: 'settings', columns: ['value'], fks: {} },

@@ -98,7 +98,8 @@ describe('Edit/delete entry repos — get + update', () => {
       expect(update[3]).toBe(150);
       expect(update[6]).toBe('edited');
       expect(update[8]).toBe('normal'); // kind (v8 column)
-      expect(update[9]).toBe(7); // WHERE id
+      expect(update[9]).toBe('[]'); // attachments JSON (v12 column)
+      expect(update[10]).toBe(7); // WHERE id
       const { enqueueChange } = require('@/db/sync/queue-repo');
       expect(enqueueChange).toHaveBeenCalledWith(
         expect.anything(),
@@ -237,7 +238,8 @@ describe('Edit/delete entry repos — get + update', () => {
       expect(update[3]).toBe('in');
       expect(update[4]).toBe(300);
       expect(update[7]).toBe('normal'); // kind (v8 column)
-      expect(update[8]).toBe(4); // WHERE id
+      expect(update[8]).toBe('[]'); // attachments JSON (v12 column)
+      expect(update[9]).toBe(4); // WHERE id
       const { enqueueChange } = require('@/db/sync/queue-repo');
       expect(enqueueChange).toHaveBeenCalledWith(
         expect.anything(),

@@ -39,11 +39,11 @@ Customer
 
 ↓
 
-Give Money
+Money Out
 
 ↓
 
-Receive Money
+Money In
 
 ↓
 

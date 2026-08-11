@@ -1,7 +1,8 @@
 /** Large, thumb-friendly action button (docs: very large buttons, 16px radius). */
 import type { LucideIcon } from 'lucide-react-native';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 
+import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { impact } from '@/utils/haptics';
@@ -70,15 +71,15 @@ export function LargeButton({
       ]}>
       {Icon ? <Icon size={26} color={foreground} strokeWidth={2.4} /> : null}
       <View style={styles.labelWrap}>
-        <Text style={[styles.title, { color: foreground }]}>{title}</Text>
+        <ThemedText style={[styles.title, { color: foreground }]}>{title}</ThemedText>
         {subtitle ? (
-          <Text
+          <ThemedText
             style={[
               styles.subtitle,
               { color: isOutline ? theme.textSecondary : 'rgba(255, 255, 255, 0.9)' },
             ]}>
             {subtitle}
-          </Text>
+          </ThemedText>
         ) : null}
       </View>
     </Pressable>

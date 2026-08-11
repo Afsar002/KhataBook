@@ -47,13 +47,13 @@ const styles = StyleSheet.create({
     fontFamily: InterFonts.medium,
   },
   title: {
-    fontSize: 48,
+    fontSize: 40,
     fontFamily: InterFonts.semibold,
-    lineHeight: 52,
+    lineHeight: 44,
   },
   subtitle: {
-    fontSize: 32,
-    lineHeight: 44,
+    fontSize: 28,
+    lineHeight: 40,
     fontFamily: InterFonts.semibold,
   },
   link: {

@@ -58,7 +58,7 @@ function GoogleSignInButton() {
       />
       {busy ? <ActivityIndicator size="small" color={theme.primary} /> : null}
       {error ? (
-        <ThemedText type="small" style={styles.error}>
+        <ThemedText type="small" themeColor="danger">
           {error}
         </ThemedText>
       ) : null}
@@ -245,12 +245,12 @@ export default function AuthScreen() {
             </ThemedText>
           </Pressable>
           {resetSent ? (
-            <ThemedText type="small" style={styles.success}>
+            <ThemedText type="small" themeColor="income">
               Reset link sent! Check your inbox and open it to choose a new password.
             </ThemedText>
           ) : null}
           {error ? (
-            <ThemedText type="small" style={styles.error}>
+            <ThemedText type="small" themeColor="danger">
               {error}
             </ThemedText>
           ) : null}
@@ -298,7 +298,7 @@ export default function AuthScreen() {
             We will send you a one-time code by SMS to verify this number.
           </ThemedText>
           {error ? (
-            <ThemedText type="small" style={styles.error}>
+            <ThemedText type="small" themeColor="danger">
               {error}
             </ThemedText>
           ) : null}
@@ -334,7 +334,7 @@ export default function AuthScreen() {
             accessibilityLabel="Verification code"
           />
           {error ? (
-            <ThemedText type="small" style={styles.error}>
+            <ThemedText type="small" themeColor="danger">
               {error}
             </ThemedText>
           ) : null}
@@ -431,12 +431,6 @@ const styles = StyleSheet.create({
   forgotRow: {
     alignSelf: 'flex-start',
     paddingVertical: Spacing.one,
-  },
-  error: {
-    color: '#EF4444',
-  },
-  success: {
-    color: '#16A34A',
   },
   footnote: {
     textAlign: 'center',

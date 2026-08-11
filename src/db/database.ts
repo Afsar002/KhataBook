@@ -169,7 +169,9 @@ const SCHEMA_TABLES = `
     category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
     note TEXT NOT NULL DEFAULT '',
     date TEXT NOT NULL,
+    time TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL DEFAULT 'normal' CHECK (kind IN ('normal', 'opening')),
+    attachments TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -181,6 +183,7 @@ const SCHEMA_TABLES = `
     amount REAL NOT NULL CHECK (amount >= 0),
     note TEXT NOT NULL DEFAULT '',
     date TEXT NOT NULL,
+    time TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -202,7 +205,9 @@ const SCHEMA_TABLES = `
     amount REAL NOT NULL CHECK (amount >= 0),
     note TEXT NOT NULL DEFAULT '',
     date TEXT NOT NULL,
+    time TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL DEFAULT 'normal' CHECK (kind IN ('normal', 'opening')),
+    attachments TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -348,6 +353,9 @@ export const nowIso = (): string => new Date().toISOString();
  * v9 (2026-08-07): `sync_conflicts` table snapshotting the local + remote
  *   sides of every LWW conflict so the Conflicts screen can review and restore
  *   overwritten local changes instead of losing them silently.
+ * v12 (2026-08-11): `attachments` JSON column on `transactions` and
+ *   `party_transactions` — metadata for image/PDF attachments (the bytes live
+ *   in the app's document directory, not the DB).
  */
 async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
   const versionRow = await database.getFirstAsync<{ user_version: number }>(
@@ -386,6 +394,12 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
     }
     if (current < 10) {
       await migrateV10(database);
+    }
+    if (current < 11) {
+      await migrateV11(database);
+    }
+    if (current < 12) {
+      await migrateV12(database);
     }
   });
 }
@@ -774,6 +788,59 @@ async function migrateV10(database: SQLite.SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
   `);
   await database.runAsync('PRAGMA user_version = 10');
+}
+
+async function migrateV11(database: SQLite.SQLiteDatabase): Promise<void> {
+  // Record the local time of day (`HH:MM`) with every entry. Plain ALTER is
+  // enough here (no CHECK needed); guarded so fresh databases that already
+  // have the column via SCHEMA_TABLES are skipped.
+  for (const table of ['transactions', 'transfers', 'party_transactions']) {
+    const columns = await database.getAllAsync<{ name: string }>(
+      `PRAGMA table_info(${table})`
+    );
+    if (!columns.some((col) => col.name === 'time')) {
+      await database.runAsync(
+        `ALTER TABLE ${table} ADD COLUMN time TEXT NOT NULL DEFAULT ''`
+      );
+    }
+  }
+  // Backfill existing entries with the local time they were recorded
+  // (`created_at` is stored in UTC). Covers both the local `datetime('now')`
+  // format and pulled ISO timestamps — SQLite parses both; anything
+  // unparseable stays '' (opening-balance entries have no time of day).
+  await database.execAsync(`
+    UPDATE transactions SET time =
+      COALESCE(strftime('%H:%M', datetime(created_at, 'localtime')), '')
+      WHERE time = '';
+    UPDATE transfers SET time =
+      COALESCE(strftime('%H:%M', datetime(created_at, 'localtime')), '')
+      WHERE time = '';
+    UPDATE party_transactions SET time =
+      COALESCE(strftime('%H:%M', datetime(created_at, 'localtime')), '')
+      WHERE time = '';
+  `);
+  await database.runAsync('PRAGMA user_version = 11');
+}
+
+/**
+ * v12: `attachments` JSON column on `transactions` and `party_transactions`.
+ *
+ * Stores the metadata array (`AttachmentMeta[]`) for image/PDF attachments; the
+ * bytes themselves live in the app's document directory. Plain ALTER, guarded so
+ * fresh databases that already have the column via SCHEMA_TABLES are skipped.
+ */
+async function migrateV12(database: SQLite.SQLiteDatabase): Promise<void> {
+  for (const table of ['transactions', 'party_transactions']) {
+    const columns = await database.getAllAsync<{ name: string }>(
+      `PRAGMA table_info(${table})`
+    );
+    if (!columns.some((col) => col.name === 'attachments')) {
+      await database.runAsync(
+        `ALTER TABLE ${table} ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`
+      );
+    }
+  }
+  await database.runAsync('PRAGMA user_version = 12');
 }
 
 export async function initDatabase(): Promise<void> {

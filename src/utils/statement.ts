@@ -10,13 +10,14 @@
  * - Customer: an 'out' entry increases the balance (they owe you more).
  * - Supplier: an 'in' entry increases the balance (you owe them more).
  *
- * The **debit** side is what increases the balance — money you gave on credit
- * ("You Gave"). The **credit** side is what reduces it — money you received
- * ("You Got").
+ * The **debit** side is what increases the balance — money out on credit
+ * ("Out"). The **credit** side is what reduces it — money in (repayment)
+ * ("In").
  *
- * The Opening Balance is a first-class ledger entry (kind = 'opening'). It is
- * timestamped as the earliest transaction, so it flows naturally through the
- * running-balance math below — there is no separate `opening_balance` addition.
+ * Every entry — including the opening entry (kind = 'opening'), which is the
+ * earliest transaction — is described by its party action title and flows
+ * through the running-balance math below. There is no separate
+ * `opening_balance` addition.
  */
 
 import type { Party, PartyTransaction, PartyType } from '@/types';
@@ -31,22 +32,19 @@ export interface StatementInclude {
   notes: boolean;
   /** Show the running-balance column and month-end balance. */
   runningBalance: boolean;
-  /** Show the opening-balance row in the summary and statement table. */
-  openingBalance: boolean;
 }
 
 export const DEFAULT_INCLUDE: StatementInclude = {
   entryDetails: true,
   notes: true,
   runningBalance: true,
-  openingBalance: true,
 };
 
 interface StatementEntry {
   id: number;
   /** `YYYY-MM-DD`. */
   date: string;
-  /** Action title, e.g. "Give Money". */
+  /** Action title, e.g. "Money Out". */
   description: string;
   note: string;
   /** Amount on the debit side (0 when the entry is a credit). */
@@ -55,7 +53,7 @@ interface StatementEntry {
   credit: number;
   /** Balance after this entry. */
   runningBalance: number;
-  /** 'opening' for the Opening Balance entry. */
+  /** 'opening' for the immutable opening entry, 'normal' otherwise. */
   kind: 'normal' | 'opening';
 }
 
@@ -94,12 +92,21 @@ function balanceDelta(type: PartyType, tx: Pick<PartyTransaction, 'direction' | 
   return entryIncreasesBalance(type, tx.direction) ? tx.amount : -tx.amount;
 }
 
-/** Description shown for a ledger entry in the statement. */
+/**
+ * Description shown for a ledger entry in the statement: the user's own note
+ * text when they wrote one, otherwise the party action title ("Money Out",
+ * "Money In", "Took on Credit", "Paid Money"). Opening entries are always
+ * described by their action — their system marker note is not user content.
+ */
 function entryDescription(
   type: PartyType,
-  tx: Pick<PartyTransaction, 'direction' | 'kind'>
+  tx: Pick<PartyTransaction, 'direction' | 'kind' | 'note'>
 ): string {
-  return tx.kind === 'opening' ? 'Opening Balance' : PARTY_ACTIONS[actionForDirection(type, tx.direction)].title;
+  if (tx.kind === 'opening') {
+    return PARTY_ACTIONS[actionForDirection(type, tx.direction)].title;
+  }
+  const note = tx.note?.trim();
+  return note || PARTY_ACTIONS[actionForDirection(type, tx.direction)].title;
 }
 
 /**
@@ -107,7 +114,7 @@ function entryDescription(
  * the `[from, to]` date range. Empty range strings mean "everything".
  *
  * The party's `openingBalance` field is intentionally NOT added here — the
- * Opening Balance is already a ledger entry (kind = 'opening') that was
+ * opening balance is already a ledger entry (kind = 'opening') that was
  * backfilled on migration, so adding it again would double-count.
  */
 export function computeStatementReport(
@@ -124,7 +131,7 @@ export function computeStatementReport(
   const inRange = sorted.filter((tx) => (!from || tx.date >= from) && (!to || tx.date <= to));
 
   // Balance carried into the period = everything recorded before `from`,
-  // including the Opening Balance entry (the earliest transaction).
+  // including the opening entry (the earliest transaction).
   const openingBalance = beforeRange.reduce((sum, tx) => sum + balanceDelta(party.type, tx), 0);
 
   let running = openingBalance;
@@ -137,7 +144,9 @@ export function computeStatementReport(
       id: tx.id,
       date: tx.date,
       description: entryDescription(party.type, tx),
-      note: tx.note,
+      // The opening entry's note is the "Opening Balance" system marker — not
+      // user content — so it is never shown in the Notes column.
+      note: tx.kind === 'opening' ? '' : tx.note,
       debit,
       credit,
       runningBalance: running,

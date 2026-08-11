@@ -34,7 +34,7 @@ export function useGlobalSearch(query: string): UseGlobalSearch {
   const [results, setResults] = useState<GlobalSearchResult>(EMPTY);
   const [searching, setSearching] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelled = useRef(false);
+  const requestId = useRef(0);
 
   useEffect(() => {
     if (timer.current) {
@@ -43,17 +43,20 @@ export function useGlobalSearch(query: string): UseGlobalSearch {
     }
     const q = query.trim();
     if (!q) {
-      cancelled.current = true;
       setResults(EMPTY);
       setSearching(false);
       return;
     }
 
+    // Bump the generation: only the latest query's response may land. A
+    // boolean "cancelled" flag got stuck true after the first cleanup (any
+    // second keystroke), so searches never returned results.
+    const id = ++requestId.current;
     setSearching(true);
     timer.current = setTimeout(() => {
       void Promise.all([searchLedger(q), searchParties(q), searchAccounts(q)]).then(
         ([transactions, parties, accounts]) => {
-          if (!cancelled.current) {
+          if (requestId.current === id) {
             setResults({ transactions, parties, accounts });
             setSearching(false);
           }
@@ -66,7 +69,6 @@ export function useGlobalSearch(query: string): UseGlobalSearch {
         clearTimeout(timer.current);
         timer.current = null;
       }
-      cancelled.current = true;
     };
   }, [query]);
 

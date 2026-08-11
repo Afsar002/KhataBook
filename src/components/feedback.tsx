@@ -16,10 +16,11 @@
 import type { LucideIcon } from 'lucide-react-native';
 import { AlertCircle, AlertTriangle, CheckCircle2, HelpCircle, Info } from 'lucide-react-native';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LargeButton } from '@/components/large-button';
+import { ThemedText } from '@/components/themed-text';
 import { AnimationDuration, InterFonts, MinTouchTarget, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -173,9 +174,11 @@ function FeedbackDialog({
           <Pressable style={StyleSheet.absoluteFill} onPress={() => dismiss()} accessibilityLabel="Close" />
           <Animated.View style={[styles.sheet, { backgroundColor: theme.card, transform: [{ translateY }] }]}>
             <View style={[styles.handle, { backgroundColor: theme.border }]} />
-            <Text style={[styles.title, { color: theme.text }]}>{dialog.opts.title}</Text>
+            <ThemedText style={styles.title}>{dialog.opts.title}</ThemedText>
             {dialog.opts.message ? (
-              <Text style={[styles.message, { color: theme.textSecondary }]}>{dialog.opts.message}</Text>
+              <ThemedText themeColor="textSecondary" style={styles.message}>
+                {dialog.opts.message}
+              </ThemedText>
             ) : null}
             <View style={styles.actions}>
               {dialog.opts.options.map((option, index) => {
@@ -232,9 +235,11 @@ function FeedbackDialog({
               <Icon size={28} color={color} />
             </View>
           ) : null}
-          <Text style={[styles.title, { color: theme.text }]}>{opts.title}</Text>
+          <ThemedText style={styles.title}>{opts.title}</ThemedText>
           {opts.message ? (
-            <Text style={[styles.message, { color: theme.textSecondary }]}>{opts.message}</Text>
+            <ThemedText themeColor="textSecondary" style={styles.message}>
+              {opts.message}
+            </ThemedText>
           ) : null}
           <View style={styles.actions}>
             {isConfirm ? (
@@ -296,9 +301,9 @@ function FeedbackToast({ opts }: { opts: ToastOptions }) {
         { marginTop: insets.top },
       ]}>
       <Icon size={18} color={foreground} />
-      <Text style={[styles.toastText, { color: foreground }]} numberOfLines={3}>
+      <ThemedText style={[styles.toastText, { color: foreground }]} numberOfLines={3}>
         {opts.message}
-      </Text>
+      </ThemedText>
     </Animated.View>
   );
 }
@@ -309,8 +314,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: Radius.button,
+    borderTopRightRadius: Radius.button,
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,
     gap: Spacing.three,

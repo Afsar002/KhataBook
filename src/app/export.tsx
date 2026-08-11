@@ -18,7 +18,9 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/card';
+import { ExportOptionsSheet } from '@/components/export-options-sheet';
 import { feedback } from '@/components/feedback';
+import { EXPORT_OPTIONS } from '@/constants/export-options';
 import { LargeButton } from '@/components/large-button';
 import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
@@ -26,23 +28,20 @@ import { TextField } from '@/components/text-field';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { buildStatementReportPdf, buildMonthlyReportPdf, buildCombinedPdf } from '@/utils/pdf';
-import { saveWorkbook, partyStatementToExcel, monthlyReportToExcel } from '@/utils/excel';
-import { shiftISODate, todayISODate } from '@/utils/format';
+import { buildStatementReportPdf, buildMonthlyReportPdf, buildCombinedPdf, buildTransactionsPdf } from '@/utils/pdf';
+import { saveWorkbook, partyStatementToExcel, monthlyReportToExcel, transactionsToExcel } from '@/utils/excel';
+import { todayISODate } from '@/utils/format';
 import { writeAndShareFile } from '@/utils/share';
 import { listParties, listPartyTransactionsAsc } from '@/db/party-repo';
 import { useMonthlyReport } from '@/hooks/use-monthly-report';
 import type { Party, PartyDirection } from '@/types';
 import { computeStatementReport, type StatementInclude, DEFAULT_INCLUDE } from '@/utils/statement';
+import { listLedgerRange } from '@/db/transaction-repo';
+import { rangePresets, type RangePreset } from '@/utils/date-range';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** "2026-08" → first day of that month as `YYYY-MM-DD`. */
-function monthStart(year: number, month: number): string {
-  return `${year}-${String(month + 1).padStart(2, '0')}-01`;
-}
-
-type ReportType = 'party' | 'monthly' | 'combined';
+type ReportType = 'party' | 'monthly' | 'combined' | 'transactions';
 type ExportFormat = 'pdf' | 'excel';
 
 export default function ExportScreen() {
@@ -52,6 +51,7 @@ export default function ExportScreen() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [busy, setBusy] = useState(false);
+  const [exportOptionsOpen, setExportOptionsOpen] = useState(false);
   const [selectedPartyId, setSelectedPartyId] = useState<number | null>(null);
   const [parties, setParties] = useState<Party[]>([]);
   const [includeOptions, setIncludeOptions] = useState<StatementInclude>(DEFAULT_INCLUDE);
@@ -82,35 +82,20 @@ export default function ExportScreen() {
     return errors.length ? errors : null;
   };
 
-  const presets = [
-    { label: 'All', apply: () => setBoth('', '') },
-    { label: 'Today', apply: () => setBoth(todayISODate(), todayISODate()) },
-    {
-      label: 'This Month',
-      apply: () => {
-        const now = new Date();
-        setBoth(monthStart(now.getFullYear(), now.getMonth()), todayISODate());
-      },
-    },
-    {
-      label: 'Last Month',
-      apply: () => {
-        const now = new Date();
-        const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastDay = shiftISODate(monthStart(now.getFullYear(), now.getMonth()), -1);
-        setBoth(monthStart(prev.getFullYear(), prev.getMonth()), lastDay);
-      },
-    },
-  ];
+  const presets = rangePresets();
 
   function setBoth(fromValue: string, toValue: string) {
     setFrom(fromValue);
     setTo(toValue);
   }
 
-  const handleGenerateReport = async () => {
+  const applyPreset = (preset: RangePreset) => {
+    setBoth(preset.from, preset.to);
+  };
+
+  const generate = async () => {
     if (busy) return;
-    
+
     const errors = validate();
     if (errors) {
       feedback.alert({
@@ -149,6 +134,8 @@ export default function ExportScreen() {
             amount: e.debit > 0 ? e.debit : e.credit,
             note: e.note,
             date: e.date,
+            // Statement exports print the day-level date only, so no time.
+            time: '',
             createdAt: new Date().toISOString(),
             runningBalance: e.runningBalance,
             kind: e.kind,
@@ -157,7 +144,6 @@ export default function ExportScreen() {
             party.name,
             party.phone,
             party.type,
-            report.openingBalance,
             report.netBalance,
             ledgerForExcel
           );
@@ -227,6 +213,35 @@ export default function ExportScreen() {
           // This is a simplified version
           feedback.toast({ message: 'Combined Excel export coming soon', tone: 'info' });
         }
+      } else if (reportType === 'transactions') {
+        const entries = await listLedgerRange(from || undefined, to || undefined);
+        if (entries.length === 0) {
+          feedback.toast({ message: 'No transactions in this range.', tone: 'info' });
+          return;
+        }
+
+        const rangeLabel = from && to ? `${from}-to-${to}` : from ?? to ?? 'all';
+
+        if (exportFormat === 'pdf') {
+          const pdfBytes = await buildTransactionsPdf({ dateFrom: from ?? '', dateTo: to ?? '', entries });
+          await writeAndShareFile({
+            filename: `dailykhata-transactions-${rangeLabel}.pdf`,
+            content: pdfBytes,
+            mimeType: 'application/pdf',
+            dialogTitle: 'Save PDF Report',
+          });
+          feedback.toast({ message: 'Transactions PDF generated', tone: 'success' });
+        } else {
+          const wb = transactionsToExcel(entries);
+          const excelBytes = await saveWorkbook(wb);
+          await writeAndShareFile({
+            filename: `dailykhata-transactions-${rangeLabel}.xlsx`,
+            content: excelBytes,
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            dialogTitle: 'Save Excel Report',
+          });
+          feedback.toast({ message: 'Transactions Excel generated', tone: 'success' });
+        }
       }
     } catch (error) {
       feedback.toast({
@@ -238,10 +253,28 @@ export default function ExportScreen() {
     }
   };
 
-  const handleShare = async () => {
-    // Share functionality uses the same writeAndShareFile which opens system share sheet
-    // This includes WhatsApp, email, etc.
-    await handleGenerateReport();
+  /**
+   * Before generating or sharing a PDF, show the Export Options sheet so the
+   * user can pick what goes in. Excel exports go straight through.
+   */
+  const handleGenerateReport = () => {
+    if (exportFormat === 'pdf') setExportOptionsOpen(true);
+    else void generate();
+  };
+
+  const handleShare = () => {
+    // Share uses the same writeAndShareFile which opens the system share
+    // sheet (WhatsApp, email, etc.).
+    handleGenerateReport();
+  };
+
+  const handleExportOptionsConfirm = () => {
+    setExportOptionsOpen(false);
+    void generate();
+  };
+
+  const toggleExportOption = (key: keyof StatementInclude) => {
+    setIncludeOptions((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   return (
@@ -258,6 +291,7 @@ export default function ExportScreen() {
             { key: 'party', label: 'Party Statement' },
             { key: 'monthly', label: 'Monthly Report' },
             { key: 'combined', label: 'Combined Report' },
+            { key: 'transactions', label: 'Transactions' },
           ].map((option) => (
             <Pressable
               key={option.key}
@@ -342,8 +376,8 @@ export default function ExportScreen() {
         <View style={styles.presetRow}>
           {presets.map((preset) => (
             <Pressable
-              key={preset.label}
-              onPress={preset.apply}
+              key={preset.key}
+              onPress={() => applyPreset(preset)}
               accessibilityRole="button"
               style={[styles.chip, { backgroundColor: theme.backgroundElement }]}>
               <ThemedText type="small" style={{ color: theme.primary }}>
@@ -361,48 +395,41 @@ export default function ExportScreen() {
         </View>
       </Card>
 
-      {/* Include Options (for party statements) */}
+      {/* Include Options (for party statements) — same list as the Export Options sheet */}
       {reportType === 'party' && (
         <Card style={styles.section}>
           <ThemedText type="smallBold" style={styles.sectionLabel}>
             Include in Report
           </ThemedText>
-          
-          <Pressable
-            onPress={() => setIncludeOptions(prev => ({ ...prev, openingBalance: !prev.openingBalance }))}
-            style={styles.optionRow}>
-            <View style={[styles.checkbox, { borderColor: theme.border }, includeOptions.openingBalance && { backgroundColor: theme.primary, borderColor: theme.primary }]}>
-              {includeOptions.openingBalance && <Check size={16} color={theme.background} />}
-            </View>
-            <ThemedText>Opening Balance</ThemedText>
-          </Pressable>
 
-          <Pressable
-            onPress={() => setIncludeOptions(prev => ({ ...prev, entryDetails: !prev.entryDetails }))}
-            style={styles.optionRow}>
-            <View style={[styles.checkbox, { borderColor: theme.border }, includeOptions.entryDetails && { backgroundColor: theme.primary, borderColor: theme.primary }]}>
-              {includeOptions.entryDetails && <Check size={16} color={theme.background} />}
-            </View>
-            <ThemedText>Entry Details</ThemedText>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setIncludeOptions(prev => ({ ...prev, notes: !prev.notes }))}
-            style={styles.optionRow}>
-            <View style={[styles.checkbox, { borderColor: theme.border }, includeOptions.notes && { backgroundColor: theme.primary, borderColor: theme.primary }]}>
-              {includeOptions.notes && <Check size={16} color={theme.background} />}
-            </View>
-            <ThemedText>Notes</ThemedText>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setIncludeOptions(prev => ({ ...prev, runningBalance: !prev.runningBalance }))}
-            style={styles.optionRow}>
-            <View style={[styles.checkbox, { borderColor: theme.border }, includeOptions.runningBalance && { backgroundColor: theme.primary, borderColor: theme.primary }]}>
-              {includeOptions.runningBalance && <Check size={16} color={theme.background} />}
-            </View>
-            <ThemedText>Running Balance</ThemedText>
-          </Pressable>
+          {EXPORT_OPTIONS.map((option) => {
+            const on = !!includeOptions[option.key];
+            return (
+              <Pressable
+                key={option.key}
+                onPress={() => toggleExportOption(option.key)}
+                style={styles.optionRow}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: on }}>
+                <View
+                  style={[
+                    styles.checkbox,
+                    { borderColor: theme.border },
+                    on && { backgroundColor: theme.primary, borderColor: theme.primary },
+                  ]}>
+                  {on && <Check size={16} color={theme.background} />}
+                </View>
+                <View style={styles.optionTextWrap}>
+                  <ThemedText>{option.label}</ThemedText>
+                  {option.hint ? (
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {option.hint}
+                    </ThemedText>
+                  ) : null}
+                </View>
+              </Pressable>
+            );
+          })}
         </Card>
       )}
 
@@ -495,6 +522,18 @@ export default function ExportScreen() {
           </ThemedText>
         </View>
       )}
+
+      {/* Export Options sheet — shown before generating/sharing a PDF */}
+      {exportOptionsOpen && (
+        <ExportOptionsSheet<keyof StatementInclude>
+          visible
+          options={EXPORT_OPTIONS}
+          selected={includeOptions}
+          onToggle={toggleExportOption}
+          onCancel={() => setExportOptionsOpen(false)}
+          onConfirm={handleExportOptionsConfirm}
+        />
+      )}
     </Screen>
   );
 }
@@ -558,6 +597,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     paddingVertical: Spacing.one,
+  },
+  optionTextWrap: {
+    flex: 1,
+    gap: Spacing.half,
   },
   checkbox: {
     width: 22,

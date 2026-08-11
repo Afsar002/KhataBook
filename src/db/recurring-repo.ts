@@ -6,6 +6,7 @@
  */
 import { getDatabase, nowIso } from '@/db/database';
 import { getCurrentUserId } from '@/services/supabase/auth';
+import { emitRecurringChanged } from '@/services/sync/events';
 import { uuid } from '@/utils/uuid';
 import type { SQLiteBindValue } from 'expo-sqlite';
 import type {
@@ -76,6 +77,7 @@ export async function addRecurringTemplate(
     now
   );
 
+  emitRecurringChanged();
   return result.lastInsertRowId;
 }
 
@@ -128,11 +130,13 @@ export async function updateRecurringTemplate(
     `UPDATE recurring_templates SET ${fields.join(', ')} WHERE id = ?`,
     ...values
   );
+  emitRecurringChanged();
 }
 
 export async function deleteRecurringTemplate(id: number): Promise<void> {
   const db = getDatabase();
   await db.runAsync('DELETE FROM recurring_templates WHERE id = ?', id);
+  emitRecurringChanged();
 }
 
 export async function getRecurringTemplate(id: number): Promise<RecurringTemplate | null> {

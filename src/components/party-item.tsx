@@ -1,13 +1,14 @@
 /** A single customer / supplier row with its balance. */
 import { memo } from 'react';
 import { Store, UserRound } from 'lucide-react-native';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { PartyBalance } from '@/types';
 import { formatINR } from '@/utils/format';
-import { isPartyReceivable, partyBalanceLabel } from '@/utils/party';
+import { isPartyReceivable, partyBalanceLabel } from '@/utils/balance';
 import { impact } from '@/utils/haptics';
 
 type PartyItemProps = {
@@ -36,16 +37,20 @@ function PartyItemRow({ item, onPress }: PartyItemProps) {
         <Icon size={22} color={theme.text} />
       </View>
       <View style={styles.middle}>
-        <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+        <ThemedText style={styles.name} numberOfLines={1}>
           {item.name}
-        </Text>
-        <Text style={[styles.sub, { color: theme.textSecondary }]} numberOfLines={1}>
+        </ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.sub} numberOfLines={1}>
           {partyBalanceLabel(item.type, item.balance)}
-        </Text>
+        </ThemedText>
       </View>
-      <Text style={[styles.amount, { color: amountColor }]}>
+      <ThemedText
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+        style={[styles.amount, { color: amountColor }]}>
         {formatINR(Math.abs(item.balance))}
-      </Text>
+      </ThemedText>
     </Pressable>
   );
 }
@@ -82,6 +87,10 @@ const styles = StyleSheet.create({
   amount: {
     fontFamily: InterFonts.semibold,
     fontSize: 18,
+    // Right-aligned and shrinkable so a large balance truncates/shrinks instead
+    // of bleeding past the row's right edge.
+    textAlign: 'right',
+    flexShrink: 1,
   },
 });
 

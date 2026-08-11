@@ -8,8 +8,8 @@ import { AmountInput } from '@/components/amount-input';
 import { Card } from '@/components/card';
 import { DatePicker } from '@/components/date-picker';
 import { LargeButton } from '@/components/large-button';
+import { NoteField } from '@/components/note-field';
 import { Segment } from '@/components/segment';
-import { TextField } from '@/components/text-field';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -19,7 +19,8 @@ import {
   getPartyTransaction,
   updatePartyTransaction,
 } from '@/db/party-repo';
-import type { PartyAction, PartyType } from '@/types';
+import type { AttachmentMeta, PartyAction, PartyType } from '@/types';
+import { removeAttachmentFiles } from '@/utils/attachments';
 import { confirmDelete } from '@/utils/confirm';
 import { todayISODate } from '@/utils/format';
 import { actionForDirection, PARTY_ACTIONS } from '@/utils/party';
@@ -47,6 +48,7 @@ export function PartyEntryForm({
   const [action, setAction] = useState<PartyAction>(startingAction);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [saving, setSaving] = useState(false);
   // Date state - defaults to today for new entries, preserves original for edit
   const [date, setDate] = useState(todayISODate());
@@ -77,6 +79,7 @@ export function PartyEntryForm({
         setAmount(String(row.amount));
         setNote(row.note);
         setDate(row.date);
+        setAttachments(row.attachments ?? []);
         setLoading(false);
       })
       .catch(() => {
@@ -105,6 +108,7 @@ export function PartyEntryForm({
         amount: numeric,
         note: note.trim(),
         date,
+        attachments,
       };
       if (editingId) {
         await updatePartyTransaction(editingId, input);
@@ -125,6 +129,8 @@ export function PartyEntryForm({
     setSaving(true);
     try {
       await deletePartyTransaction(editingId);
+      // Best-effort cleanup of the stored files — a stale file is harmless.
+      await removeAttachmentFiles(attachments);
       router.back();
     } finally {
       setSaving(false);
@@ -154,12 +160,13 @@ export function PartyEntryForm({
       </Card>
 
       <Card style={styles.card}>
-        <TextField
-          label="Note (optional)"
+        <NoteField
           value={note}
           onChangeText={setNote}
           placeholder={meta.hint}
           accessibilityLabel="Note"
+          attachments={attachments}
+          onChangeAttachments={setAttachments}
         />
       </Card>
 

@@ -91,6 +91,99 @@
 - ✓ Selective sync: Wi-Fi-only + periodic auto-sync scheduling settings
 - ✓ PDF export WinAnsi crash fix
 
+## Completed (Push notifications 2026-08-08)
+
+- ✓ Recurring due-day reminders: one scheduled local notification per active
+    template for its next due date at 08:00, re-armed on boot and on any
+    template create/edit/delete/toggle (`src/services/notifications/reminders.ts`)
+- ✓ Sync-outcome notifications (conflicts / upload failures / new entries from
+    other devices) when a backgrounded sync finishes; foreground runs skipped,
+    ~5-min cooldown (`src/services/notifications/sync.ts`)
+- ✓ Device-local AsyncStorage toggles in Settings (Recurring reminders / Sync
+    updates) with lazy permission + denial toast (`NotificationsCard`)
+- ✓ Local-only (expo-notifications) — requires a development build; no-op on
+    web and in Expo Go (importing expo-notifications crashes Expo Go Android,
+    so the module is lazy-loaded via `getNotifications()` and never touched there)
+- ✓ `emitRecurringChanged` / `emitSyncResult` events wired through
+    recurring-repo + sync-engine
+- ✓ `npx expo-doctor` 20/20 (aligned 6 pre-existing SDK57 patch drifts +
+    added react-native-worklets peer)
+- ✓ 21 new tests (prefs / reminders / sync-notifications); full suite 308 green
+
+## Completed (History filters → SQL 2026-08-08)
+
+- ✓ History search + advanced filters (date/amount/account/category) now run as
+    SQL WHERE clauses over the ledger feed (`buildLedgerFilter`), applied across
+    the whole table instead of only the loaded pages; pagination composes with
+    filtering and resets when filters change (`useLedger` value-key reload)
+
+## Completed (Customer Statement PDF polish 2026-08-08)
+
+- ✓ Include Running Balance / Include Notes / Include Description work
+    independently — table columns built dynamically for all 8 combinations
+- ✓ Description column = transaction description (never concatenated with the
+    type; falls back to Give/Receive/Took on Credit); no "…" placeholders
+- ✓ Notes render in their own column, never merged with the Description
+- ✓ Summary heading on its own row (no overlap); Net Balance independent of the
+    Running Balance toggle
+- ✓ Root-cause layout fixes: no-table run off-page no longer happens, totals
+    draw after page-break checks, month headers not duplicated across pages
+- ✓ Opening Balance stays in the ledger but never prints in statement/Excel
+- ✓ Verified all 8 combinations + multi-page output positionally (see CHANGELOG)
+
+## Completed (Home balances + overdraft safety 2026-08-08)
+
+- ✓ Negative balances render red on Home — Total Balance, Cash and Total Bank
+    sign-color themselves (`BalanceCard` defaults to expense red when the amount
+    is negative) instead of always showing the income green
+- ✓ Overdraft confirmation — an income/expense that would push an account below
+    zero asks first ("Save anyway?"). Projection logic lives once in
+    `src/utils/account-balance.ts`, shared by the transaction and transfer forms
+- ✓ Transfers can never overdraft — moving more than the source account holds is
+    blocked outright (Save disabled), not just confirmed
+
+## Completed (Layout: no white gap above the tab bar 2026-08-08)
+
+- ✓ Tab screens no longer re-apply the bottom safe-area inset (the tab bar owns
+    it) — the blank strip between the last list item and the tab bar is gone.
+    Home/Reports/Settings use `Screen`'s new `hasTabBar` flag; Khata and History
+    use top-only safe edges with zero bottom padding
+- ✓ Nothing hides behind the tab bar on Android or iOS; the wide/sidebar desktop
+    layout is unchanged
+
+## Completed (Email + password fallback)
+
+- ✓ A third sign-in path alongside phone OTP and Google: the auth screen's
+    Phone / Email switch collects an email + password; signing in, creating an
+    account (with confirmation-email handling) and password reset all work via
+    the existing provider-agnostic AuthService
+- ✓ Supabase Email provider setup documented in docs/13-supabase-setup.md
+
+## Completed (Notification deep-linking 2026-08-08)
+
+- ✓ Tapping a notification opens the screen it belongs to: a recurring reminder
+    goes to `/recurring`, a sync alert to `/settings` (Cloud Sync / conflict
+    review) — no more generic app open
+- ✓ Target is carried in the payload as `content.data.url` and checked against
+    an explicit allow-list (`src/services/notifications/deeplink.ts`), so a
+    payload can never drive the router elsewhere; cold-start taps handled via
+    `getLastNotificationResponseAsync`
+
+## Completed (Cashbook + Deposit & Withdraw Report 2026-08-11)
+
+- ✓ History tab renamed **Cashbook** and rebuilt as today's ledger — summary
+    card (Cash in Hand / Today's Balance), day header with Withdraw/Deposit
+    totals, 3-column Time | Withdraw | Deposit cards, sticky −Withdraw/+Deposit
+- ✓ "VIEW DEPOSIT & WITHDRAW REPORT >" pushes the report — date range card,
+    duration dropdown (This Month default), day cards that drill into a day,
+    sticky blue Download (reuses the PDF export); no search bar (user request)
+- ✓ Day detail screen (`history-day/[date]`) shares the Cashbook body via
+    `DayLedgerView`; entry forms pre-fill the day's date (`defaultDate` prop)
+- ✓ `listDaySummaries()` — per-day income/expense/entryCount with a SQL running
+    `cashInHand` that carries a pre-range balance into bounded queries
+- ✓ 15 new tests (real-SQLite day aggregation + date-label helpers); full
+    suite 358 green
+
 ## Removed
 
 - Local Unlock Protection (v1.11) was never wired in — removed in the
@@ -98,6 +191,4 @@
 
 ## Pending
 
-- Email + password fallback
-- Profile / shop name + avatar
-- Per-device device name ("Last Sync from")
+- None — the roadmap lives in docs/09-future-features.md.

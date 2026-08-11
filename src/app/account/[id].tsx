@@ -2,11 +2,12 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Pencil, ReceiptText, Trash2 } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/card';
 import { feedback } from '@/components/feedback';
 import { EmptyState } from '@/components/empty-state';
+import { FitText } from '@/components/fit-text';
 import { LargeButton } from '@/components/large-button';
 import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
@@ -109,9 +110,9 @@ export default function AccountDetailScreen() {
         <ThemedText type="small" themeColor="textSecondary">
           {TYPE_LABELS[account.type]}
         </ThemedText>
-        <Text style={[styles.balance, { color: account.balance < 0 ? theme.expense : theme.primary }]} numberOfLines={1} ellipsizeMode="tail">
+        <FitText fontSize={34} style={[styles.balance, { color: account.balance < 0 ? theme.expense : theme.primary }]}>
           {formatINR(account.balance)}
-        </Text>
+        </FitText>
         <View style={styles.actions}>
           <LargeButton
             title="Rename"
@@ -182,7 +183,7 @@ export default function AccountDetailScreen() {
 const styles = StyleSheet.create({
   balance: {
     fontFamily: 'Inter_700Bold',
-    fontSize: 40,
+    fontSize: 34,
     marginTop: Spacing.one,
   },
   actions: {

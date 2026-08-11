@@ -10,6 +10,7 @@ import { Contact, ContactField } from 'expo-contacts';
 import { UserRound } from 'lucide-react-native';
 import { useState } from 'react';
 
+import { feedback } from '@/components/feedback';
 import { LargeButton } from '@/components/large-button';
 
 type ContactPickerButtonProps = {
@@ -31,16 +32,33 @@ export function ContactPickerButton({ onPicked }: ContactPickerButtonProps) {
       }
       const details = await contact.getDetails([
         ContactField.FULL_NAME,
+        ContactField.GIVEN_NAME,
+        ContactField.FAMILY_NAME,
         ContactField.PHONES,
       ]);
-      const name = details?.fullName?.trim() ?? '';
+      // `fullName` can be null on Android — compose it from the name parts.
+      const fullName = details?.fullName?.trim() ?? '';
+      const composedName = [details?.givenName, details?.familyName]
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+      const name = fullName || composedName;
       const phone = details?.phones?.[0]?.number ?? '';
       if (name || phone) {
         // Keep digits (and a leading +) so the phone field stays clean.
         onPicked(name, phone.replace(/[^+\d]/g, ''));
+      } else {
+        feedback.toast({
+          message: 'Selected contact has no name or phone number',
+          tone: 'info',
+        });
       }
-    } catch {
-      // Permission denied or picker unavailable — leave the form as-is.
+    } catch (err) {
+      console.warn('[ContactPickerButton] picker failed', err);
+      feedback.toast({
+        message: 'Could not pick contact — permission denied or unavailable',
+        tone: 'error',
+      });
     } finally {
       setPicking(false);
     }

@@ -5,7 +5,6 @@ import { File } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import {
   AlertTriangle,
-  CalendarRange,
   Check,
   ChevronDown,
   ChevronRight,
@@ -31,8 +30,10 @@ import { Card } from '@/components/card';
 import { Chip } from '@/components/chip';
 import { feedback } from '@/components/feedback';
 import { LargeButton } from '@/components/large-button';
+import { NotificationsCard } from '@/components/notifications-card';
 import { Screen } from '@/components/screen';
 import { TextField } from '@/components/text-field';
+import { notificationsSupported } from '@/services/notifications/expo';
 import { ThemedText } from '@/components/themed-text';
 import { APP_VERSION } from '@/constants/app';
 import { Radius, Spacing } from '@/constants/theme';
@@ -304,7 +305,7 @@ function CloudSyncCard() {
           realtimeMode === 'live' ? 'Live' : realtimeMode === 'trigger' ? 'Trigger-based' : 'Off'
         }
         dotColor={
-          realtimeMode === 'live' ? '#16A34A' : realtimeMode === 'trigger' ? '#F59E0B' : theme.border
+          realtimeMode === 'live' ? theme.income : realtimeMode === 'trigger' ? theme.warning : theme.border
         }
       />
       {lastSyncFrom ? <CloudInfoRow label="From Device" value={lastSyncFrom} /> : null}
@@ -963,7 +964,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <Screen>
+    <Screen hasTabBar>
       <ThemedText type="subtitle">Settings</ThemedText>
 
       <ProfileCard />
@@ -988,6 +989,7 @@ export default function SettingsScreen() {
       </Card>
 
       {Platform.OS !== 'web' ? <AppLockCard /> : null}
+      {notificationsSupported() ? <NotificationsCard /> : null}
 
       <Pressable
         onPress={() => router.push('/categories')}
@@ -1080,7 +1082,7 @@ export default function SettingsScreen() {
 
           <Card style={styles.dataCard}>
             <LargeButton
-              title="Export Transactions (Excel)"
+              title="Export Transactions"
               subtitle="Income & expense as Excel file"
               icon={FileSpreadsheet}
               onPress={handleExportTransactions}
@@ -1089,7 +1091,7 @@ export default function SettingsScreen() {
               disabled={busy !== null}
             />
             <LargeButton
-              title="Export Khata (Excel)"
+              title="Export Khata "
               subtitle="Customer & supplier ledgers as Excel"
               icon={FileSpreadsheet}
               onPress={handleExportKhata}
@@ -1097,15 +1099,7 @@ export default function SettingsScreen() {
               height={64}
               disabled={busy !== null}
             />
-            <LargeButton
-              title="Export with Date Range"
-              subtitle="Filter by dates or export combined"
-              icon={CalendarRange}
-              onPress={() => router.push('/export')}
-              variant="outline"
-              height={64}
-              disabled={busy !== null}
-            />
+            
           </Card>
 
           <Card style={styles.about}>

@@ -1,7 +1,8 @@
 /** Tappable pill used for selection (accounts, categories, filters). */
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, type ViewStyle } from 'react-native';
 
+import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { impact } from '@/utils/haptics';
@@ -38,11 +39,12 @@ export function Chip({ label, selected, onPress, icon, style }: ChipProps) {
         style,
       ]}>
       {icon}
-      <Text
+      <ThemedText
+        type="smallBold"
         style={[styles.label, { color: selected ? '#FFFFFF' : theme.text }]}
         numberOfLines={1}>
         {label}
-      </Text>
+      </ThemedText>
     </Pressable>
   );
 }

@@ -1,8 +1,9 @@
 /** Khata headline cards: money to receive, money to pay, net. */
 import { HandCoins, Scale, Wallet, type LucideIcon } from 'lucide-react-native';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/card';
+import { FitText } from '@/components/fit-text';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -67,12 +68,9 @@ function SummaryColumn({
         style={styles.label}>
         {label}
       </ThemedText>
-      <Text
-        style={[styles.amount, { color }]}
-        numberOfLines={1}
-        ellipsizeMode="tail">
+      <FitText fontSize={16} style={[styles.amount, { color }]}>
         {sign ? `${sign}${formatINR(Math.abs(amount))}` : formatINR(amount)}
-      </Text>
+      </FitText>
     </View>
   );
 }
@@ -97,10 +95,8 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   amount: {
-    fontSize: 18,
+    fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
-    flexShrink: 1,
-    minWidth: 0,
     textAlign: 'center',
   },
 });

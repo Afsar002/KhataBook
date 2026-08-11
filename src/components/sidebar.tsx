@@ -8,8 +8,9 @@
  */
 import { router, usePathname, type Href } from 'expo-router';
 import type { LucideIcon } from 'lucide-react-native';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -48,9 +49,9 @@ export function Sidebar({ items }: { items: SidebarItem[] }) {
     <View style={[styles.rail, { backgroundColor: theme.card, borderRightColor: theme.border }]}>
       <View style={styles.brand}>
         <View style={[styles.brandMark, { backgroundColor: theme.primary }]}>
-          <Text style={styles.brandMarkText}>K</Text>
+          <ThemedText style={styles.brandMarkText}>K</ThemedText>
         </View>
-        <Text style={[styles.brandName, { color: theme.text }]}>DailyKhata</Text>
+        <ThemedText style={styles.brandName}>DailyKhata</ThemedText>
       </View>
 
       <View style={styles.nav}>
@@ -73,7 +74,7 @@ export function Sidebar({ items }: { items: SidebarItem[] }) {
                 color={isActive ? theme.primary : theme.textSecondary}
                 strokeWidth={isActive ? 2.4 : 2}
               />
-              <Text
+              <ThemedText
                 style={[
                   styles.itemLabel,
                   {
@@ -82,7 +83,7 @@ export function Sidebar({ items }: { items: SidebarItem[] }) {
                   },
                 ]}>
                 {title}
-              </Text>
+              </ThemedText>
             </Pressable>
           );
         })}

@@ -1,6 +1,7 @@
 /** Large rupee amount input with a live formatted preview. */
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 
+import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatINR } from '@/utils/format';
@@ -26,7 +27,9 @@ export function AmountInput({ value, onChangeText }: AmountInputProps) {
           styles.row,
           { backgroundColor: theme.backgroundElement, borderColor: theme.border },
         ]}>
-        <Text style={[styles.currency, { color: theme.textSecondary }]}>₹</Text>
+        <ThemedText themeColor="textSecondary" style={styles.currency}>
+          ₹
+        </ThemedText>
         <TextInput
           value={value}
           onChangeText={handleChange}
@@ -38,7 +41,9 @@ export function AmountInput({ value, onChangeText }: AmountInputProps) {
           style={[styles.input, { color: theme.text }]}
         />
       </View>
-      <Text style={[styles.preview, { color: theme.textSecondary }]}>{preview}</Text>
+      <ThemedText themeColor="textSecondary" style={styles.preview}>
+        {preview}
+      </ThemedText>
     </View>
   );
 }
@@ -57,13 +62,13 @@ const styles = StyleSheet.create({
   },
   currency: {
     fontFamily: InterFonts.semibold,
-    fontSize: 34,
+    fontSize: 28,
     marginRight: Spacing.two,
   },
   input: {
     flex: 1,
     fontFamily: InterFonts.semibold,
-    fontSize: 36,
+    fontSize: 30,
     paddingVertical: Spacing.two,
   },
   preview: {

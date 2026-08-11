@@ -7,6 +7,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { LargeButton } from '@/components/large-button';
 import { RecurringForm, type RecurringFormValues } from '@/components/recurring-form';
+import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
 import { feedback } from '@/components/feedback';
 import {
@@ -58,11 +59,13 @@ export default function RecurringEditScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ThemedText type="default" themeColor="textSecondary">
-          Loading template…
-        </ThemedText>
-      </View>
+      <Screen scroll={false}>
+        <View style={styles.center}>
+          <ThemedText type="default" themeColor="textSecondary">
+            Loading template…
+          </ThemedText>
+        </View>
+      </Screen>
     );
   }
 

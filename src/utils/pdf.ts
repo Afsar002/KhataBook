@@ -1,15 +1,24 @@
 /**
- * Monthly report → PDF (pdf-lib).
+ * PDF exporters for DailyKhata (pdf-lib).
  *
- * Uses pdf-lib's built-in Helvetica fonts, which do not include the rupee
- * glyph, so amounts are written as "Rs. 1,23,456". One A4 page is used;
- * long breakdowns flow onto additional pages automatically.
+ * Four documents, all A4 portrait and print/WhatsApp-friendly:
+ *   - `buildMonthlyReportPdf`   — monthly income / expense / profit summary
+ *   - `buildStatementReportPdf` — Khatabook-style customer/supplier statement
+ *   - `buildCombinedPdf`        — monthly report + one statement per party
+ *   - `buildTransactionsPdf`    — filtered transaction list with summary
+ *
+ * Typography: the app's bundled Inter font is embedded so amounts render with a
+ * real Indian Rupee glyph (₹1,23,456). The TTF bytes live in
+ * `@expo-google-fonts/inter` and are loaded by `pdf-fonts.ts`; when they are
+ * unavailable the builders fall back to pdf-lib's built-in Helvetica and
+ * "Rs. 1,23,456". Both paths produce identical layouts.
  */
 
-import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 
-import { listPartyTransactions } from '@/db/party-repo';
-import type { MonthReport, Party, PartyBalance, PartyTransaction, PartyType } from '@/types';
+import { listPartyTransactionsAsc } from '@/db/party-repo';
+import type { LedgerRow, MonthReport, Party, PartyBalance, PartyTransaction, PartyType } from '@/types';
 import {
   formatDateTime,
   formatINR,
@@ -17,42 +26,707 @@ import {
   formatReportRange,
   monthLabel,
 } from '@/utils/format';
-import { actionForDirection, entryIncreasesBalance, PARTY_ACTIONS } from '@/utils/party';
+import { isPartyReceivable } from '@/utils/balance';
 import {
   computeStatementReport,
   type StatementInclude,
   type StatementReport,
 } from '@/utils/statement';
+import { getPdfFontBytes } from '@/utils/pdf-fonts';
 
-const PAGE_WIDTH = 595.28; // A4 portrait (points)
-const PAGE_HEIGHT = 841.89;
-const MARGIN = 48;
-const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
-const GREEN = rgb(0.086, 0.639, 0.29); // ~ #16A34A
-const RED = rgb(0.937, 0.267, 0.267); // ~ #EF4444
-const DARK = rgb(0.09, 0.09, 0.09);
-const GRAY = rgb(0.42, 0.42, 0.42);
+/* ---------------------------------------------------------------------------
+ * Document geometry & palette
+ * ------------------------------------------------------------------------- */
 
-/** Indian-grouped amount with an ASCII "Rs." prefix (no ₹ glyph). */
-function rupees(amount: number): string {
-  const sign = amount < 0 ? '-' : '';
-  const grouped = formatINR(Math.abs(amount)).replace('₹', '');
-  return `${sign}Rs. ${grouped}`;
+const PAGE_W = 595.28; // A4 portrait (points)
+const PAGE_H = 841.89;
+const MARGIN = 44;
+const CONTENT_W = PAGE_W - MARGIN * 2;
+const TOP = PAGE_H - MARGIN;
+const BOTTOM = 54; // content stops here; footers sit at y = 30
+
+/** Converts a "#RRGGBB" hex color to a pdf-lib RGB color. */
+function hex(color: string): ReturnType<typeof rgb> {
+  const value = parseInt(color.slice(1), 16);
+  return rgb(((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255);
+}
+
+const BRAND = hex('#16A34A'); // app primary green
+const DARK = hex('#1F2937'); // near-black body text
+const GRAY = hex('#6B7280'); // secondary text
+const MUTED = hex('#9CA3AF'); // placeholder / dashes
+const LIGHT = hex('#F3F6F3'); // zebra rows, panels
+const BORDER = hex('#DCE3DC'); // hairline rules
+const RED = hex('#DC2626');
+const WHITE = hex('#FFFFFF');
+
+/** Glyphs outside Latin-1 that WinAnsi (Helvetica) can still encode. */
+const WINANSI_EXTRA = new Set([
+  0x2013, 0x2014, 0x2018, 0x2019, 0x201a, 0x201b, 0x201c, 0x201d, 0x201e, 0x201f,
+  0x2020, 0x2021, 0x2022, 0x2026, 0x2030, 0x2039, 0x203a, 0x20ac, 0x2122,
+  0x0152, 0x0153, 0x0160, 0x0161, 0x0178, 0x017d, 0x017e, 0x0192,
+]);
+
+/* ---------------------------------------------------------------------------
+ * Glyph-aware text handling
+ * ------------------------------------------------------------------------- */
+
+const charsets = new WeakMap<PDFFont, Set<number> | null>();
+
+function charsetOf(font: PDFFont): Set<number> | null {
+  let set = charsets.get(font);
+  if (set === undefined) {
+    try {
+      const chars = (font as unknown as { getCharacterSet?: () => number[] }).getCharacterSet?.();
+      set = Array.isArray(chars) ? new Set(chars) : null;
+    } catch {
+      set = null;
+    }
+    charsets.set(font, set);
+  }
+  return set;
 }
 
 /**
- * Replaces characters that pdf-lib's built-in WinAnsi fonts cannot encode.
- * Android's `en-IN` locale emits U+202F (narrow no-break space) inside
- * formatted dates, and user-entered text may contain emoji or non-Latin
- * scripts — all of which crash `doc.save()` with "WinAnsi cannot encode …".
+ * Keeps only characters a given font can actually render, so `doc.save()` never
+ * throws ("WinAnsi cannot encode…") and no tofu boxes appear in the output.
+ * Embedded fonts use their real charset; Helvetica uses Latin-1 + WinAnsi
+ * punctuation. A narrow no-break space (U+202F) from the `en-IN` locale is
+ * always normalized to a plain space.
  */
-function sanitize(text: string): string {
-  return text
-    .replace(/\u202F/g, ' ') // narrow no-break space (en-IN locale)
-    .replace(/\u00A0/g, ' ') // no-break space
-    .replace(/₹/g, 'Rs.') // rupee sign (defensive; rupees() already strips it)
-    .replace(/[^\x00-\xFF]/g, ''); // drop anything outside WinAnsi/Latin-1
+function sanitize(text: string, font: PDFFont): string {
+  const normalized = text.replace(/[  ]/g, ' ');
+  const cs = charsetOf(font);
+  if (!cs) {
+    let out = '';
+    for (const ch of normalized) {
+      const code = ch.charCodeAt(0);
+      if (code <= 0xff || WINANSI_EXTRA.has(code)) out += ch;
+    }
+    return out;
+  }
+  let out = '';
+  for (const ch of normalized) {
+    const cp = ch.codePointAt(0);
+    if (cp !== undefined && cs.has(cp)) out += ch;
+  }
+  return out;
 }
+
+/* ---------------------------------------------------------------------------
+ * Renderer — owns the current page + y cursor and paints primitives
+ * ------------------------------------------------------------------------- */
+
+class Renderer {
+  readonly doc: PDFDocument;
+  readonly regular: PDFFont;
+  readonly bold: PDFFont;
+  /** True when an embedded font with a ₹ glyph is available. */
+  readonly rupee: boolean;
+  page!: PDFPage;
+  y!: number;
+  /** Called after a fresh page is created (e.g. to redraw table headers). */
+  onPageBreak: (() => void) | undefined;
+
+  constructor(doc: PDFDocument, regular: PDFFont, bold: PDFFont, rupee: boolean) {
+    this.doc = doc;
+    this.regular = regular;
+    this.bold = bold;
+    this.rupee = rupee;
+    this.newPage();
+  }
+
+  newPage(): void {
+    this.page = this.doc.addPage([PAGE_W, PAGE_H]);
+    this.y = TOP;
+    this.onPageBreak?.();
+  }
+
+  /** Starts a new page when `height` points won't fit above the footer zone. */
+  ensure(height: number): void {
+    if (this.y - height < BOTTOM) this.newPage();
+  }
+
+  width(text: string, size: number, font: PDFFont = this.regular): number {
+    return font.widthOfTextAtSize(sanitize(text, font), size);
+  }
+
+  draw(
+    text: string,
+    x: number,
+    y: number,
+    size: number,
+    font: PDFFont = this.regular,
+    color: ReturnType<typeof rgb> = DARK
+  ): void {
+    this.page.drawText(sanitize(text, font), { x, y, size, font, color });
+  }
+
+  drawRight(
+    text: string,
+    rightX: number,
+    y: number,
+    size: number,
+    font: PDFFont = this.regular,
+    color: ReturnType<typeof rgb> = DARK
+  ): void {
+    this.page.drawText(sanitize(text, font), { x: rightX - this.width(text, size, font), y, size, font, color });
+  }
+
+  drawCentered(
+    text: string,
+    centerX: number,
+    y: number,
+    size: number,
+    font: PDFFont = this.regular,
+    color: ReturnType<typeof rgb> = DARK
+  ): void {
+    this.page.drawText(sanitize(text, font), { x: centerX - this.width(text, size, font) / 2, y, size, font, color });
+  }
+
+  /** Indian-grouped amount; uses "₹" when an embedded font can show it. */
+  money(amount: number, font: PDFFont = this.bold): string {
+    const formatted = formatINR(amount);
+    return this.rupee ? formatted : formatted.replace('₹', 'Rs. ');
+  }
+
+  /** One line, cut with an ellipsis if it exceeds `maxWidth`. */
+  ellipsize(text: string, font: PDFFont, size: number, maxWidth: number): string {
+    const safe = sanitize(text, font);
+    if (this.width(safe, size, font) <= maxWidth) return safe;
+    let out = safe;
+    while (out.length > 1 && this.width(`${out.slice(0, -1)}…`, size, font) > maxWidth) {
+      out = out.slice(0, -1);
+    }
+    return `${out.slice(0, -1)}…`;
+  }
+
+  /** Wraps text onto as many lines as needed; a single word wider than the
+   *  column is ellipsized rather than split mid-word. */
+  wordWrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+    const safe = sanitize(text, font);
+    const words = safe.split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [];
+    const lines: string[] = [];
+    let line = '';
+    for (const word of words) {
+      if (this.width(word, size, font) > maxWidth) {
+        if (line) {
+          lines.push(line);
+          line = '';
+        }
+        lines.push(this.ellipsize(word, font, size, maxWidth));
+        continue;
+      }
+      const trial = line ? `${line} ${word}` : word;
+      if (this.width(trial, size, font) <= maxWidth) line = trial;
+      else {
+        lines.push(line);
+        line = word;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  /** `wordWrap` capped at `maxLines`, the last kept line ending in "…". */
+  fit(text: string, font: PDFFont, size: number, maxWidth: number, maxLines: number): string[] {
+    const lines = this.wordWrap(text, font, size, maxWidth);
+    if (lines.length <= maxLines) return lines;
+    const kept = lines.slice(0, maxLines);
+    kept[maxLines - 1] = this.ellipsize(`${kept[maxLines - 1]} ${lines.slice(maxLines).join(' ')}`, font, size, maxWidth);
+    return kept;
+  }
+}
+
+type RenderColor = ReturnType<typeof rgb>;
+
+/* ---------------------------------------------------------------------------
+ * Shared drawing helpers
+ * ------------------------------------------------------------------------- */
+
+/** Brand band: DK logo, wordmark, centered title and a brand underline. */
+function drawBrandHeader(r: Renderer, title: string, subtitle?: string): void {
+  const y0 = r.y;
+  const cx = MARGIN + 14;
+  const cy = y0 - 13;
+  r.page.drawEllipse({ x: cx, y: cy, xScale: 13, yScale: 13, color: BRAND });
+  const lw = r.width('DK', 12, r.bold);
+  r.draw('DK', cx - lw / 2, cy - 4.5, 12, r.bold, WHITE);
+  r.draw('DailyKhata', MARGIN + 32, y0, 20, r.bold, DARK);
+  r.draw('Your khata ledger, made simple', MARGIN + 32, y0 - 15, 8.5, r.regular, GRAY);
+  r.drawCentered(title, PAGE_W / 2, y0 - 33, 14, r.bold, BRAND);
+  if (subtitle) r.drawCentered(subtitle, PAGE_W / 2, y0 - 46, 9.5, r.regular, GRAY);
+  r.y = subtitle ? y0 - 56 : y0 - 45;
+  r.page.drawRectangle({ x: MARGIN, y: r.y, width: CONTENT_W, height: 2.5, color: BRAND });
+  r.y -= 16;
+}
+
+/**
+ * 3×3 summary grid:
+ *  Row 1: Title (spans all 3 columns, left-aligned)
+ *  Row 2: Column labels (centered) — Income/Total Debit | Total Expense/Total Credit | Total Balance/Net Balance
+ *  Row 3: Amount values (centered under each label)
+ */
+function drawFiguresBox(
+  r: Renderer,
+  title: string,
+  figures: { label: string; value: string; color?: RenderColor }[]
+): void {
+  const pad = 16;
+  const titleSize = 11;
+  const labelSize = 8.5;
+  const valueSize = 13;
+  const rowGap = 10;
+  const boxH = pad * 2 + titleSize + labelSize + valueSize + rowGap * 2;
+
+  r.ensure(boxH + 12);
+  const top = r.y;
+  r.page.drawRectangle({ x: MARGIN, y: top - boxH, width: CONTENT_W, height: boxH, color: LIGHT });
+  r.page.drawRectangle({ x: MARGIN, y: top - boxH, width: CONTENT_W, height: boxH, borderColor: BORDER, borderWidth: 1 });
+
+  // Row 1: Title (left-aligned, spans full width)
+  const titleY = top - pad - titleSize;
+  r.draw(title, MARGIN + pad, titleY, titleSize, r.bold, DARK);
+
+  // Row 2 & 3: 3 columns
+  const cellW = (CONTENT_W - pad * 2) / 3;
+  const labelY = titleY - rowGap - labelSize;
+  const valueY = labelY - rowGap - valueSize;
+
+  figures.forEach((fig, i) => {
+    const centerX = MARGIN + pad + i * cellW + cellW / 2;
+    // Row 2: Label (centered)
+    r.drawCentered(fig.label, centerX, labelY, labelSize, r.regular, GRAY);
+    // Row 3: Value (centered)
+    r.drawCentered(fig.value, centerX, valueY, valueSize, r.bold, fig.color ?? DARK);
+  });
+
+  r.y = top - boxH - 18;
+}
+
+/** Adds "DailyKhata" + "Page N of M" on every page (call last). */
+function addFooters(r: Renderer): void {
+  const pages = r.doc.getPages();
+  pages.forEach((page, index) => {
+    page.drawText('DailyKhata', { x: MARGIN, y: 30, size: 8.5, font: r.regular, color: GRAY });
+    const label = `Page ${index + 1} of ${pages.length}`;
+    const width = r.width(label, 8.5, r.regular);
+    page.drawText(label, { x: (PAGE_W - width) / 2, y: 30, size: 8.5, font: r.regular, color: GRAY });
+  });
+}
+
+/* ---------------------------------------------------------------------------
+ * Statement table
+ * ------------------------------------------------------------------------- */
+
+const DEFAULT_STATEMENT_INCLUDE: StatementInclude = {
+  entryDetails: true,
+  notes: true,
+  runningBalance: true,
+};
+
+type ColumnKey = 'date' | 'desc' | 'notes' | 'debit' | 'credit' | 'running' | 'type' | 'note' | 'cat' | 'amount';
+
+interface Column {
+  key: ColumnKey;
+  label: string;
+  x: number;
+  width: number;
+  align: 'left' | 'right';
+}
+
+const COL_LABELS: Record<ColumnKey, string> = {
+  date: 'Date',
+  desc: 'Description',
+  notes: 'Notes',
+  debit: 'Debit (Out)',
+  credit: 'Credit (In)',
+  running: 'Running Balance',
+  type: 'Type',
+  note: 'Note',
+  cat: 'Category / Account',
+  amount: 'Amount',
+};
+
+/**
+ * Column geometry for a statement table, built from the selected include
+ * options so every one of the 2³ combinations spans the full content width:
+ *  - Date and Debit/Credit are always present.
+ *  - Description, Notes and Running Balance appear only when their option is on.
+ * The amount columns are right-anchored at their base widths; the Description /
+ * Notes columns share the space between the Date column and the first amount
+ * column, growing proportionally as options are switched off so no empty column
+ * or dead space is ever left behind.
+ */
+function buildColumns(include: StatementInclude): Column[] {
+  const gap = 8;
+  const dateW = 54;
+  const right = PAGE_W - MARGIN;
+
+  const amounts: { key: 'debit' | 'credit' | 'running'; width: number }[] = [
+    { key: 'debit', width: 78 },
+    { key: 'credit', width: 78 },
+  ];
+  if (include.runningBalance) amounts.push({ key: 'running', width: 92 });
+
+  const textCols: { key: 'desc' | 'notes'; width: number }[] = [];
+  if (include.entryDetails) textCols.push({ key: 'desc', width: 150 });
+  if (include.notes) textCols.push({ key: 'notes', width: 96 });
+
+  const dateEnd = MARGIN + dateW + gap;
+  // Where the first amount column starts, keeping the amounts right-anchored.
+  let firstAmountX =
+    right - (amounts.reduce((s, a) => s + a.width, 0) + Math.max(0, amounts.length - 1) * gap);
+
+  if (textCols.length === 0) {
+    // No text columns — resize the amount columns to fill the whole band
+    // between the Date column and the right margin (minus the inter-column
+    // gaps) and start them at dateEnd, so the table still spans the full
+    // width instead of shrinking toward the right edge.
+    const band = right - dateEnd;
+    const gapsTotal = Math.max(0, amounts.length - 1) * gap;
+    const target = band - gapsTotal;
+    if (target > 0) {
+      const baseSum = amounts.reduce((s, a) => s + a.width, 0);
+      for (const a of amounts) a.width = (target * a.width) / baseSum;
+    }
+    firstAmountX = dateEnd;
+  } else {
+    // The whole middle band is shared across the enabled text columns; each is
+    // sized proportionally to how much text it is expected to hold, so their
+    // combined width exactly fills the band and never overruns the amounts.
+    const available = firstAmountX - dateEnd - textCols.length * gap;
+    if (available > 0) {
+      const baseSum = textCols.reduce((s, t) => s + t.width, 0);
+      for (const t of textCols) t.width = (available * t.width) / baseSum;
+    }
+  }
+
+  const cols: Column[] = [];
+  let x = MARGIN;
+  cols.push({ key: 'date', label: COL_LABELS.date, x, width: dateW, align: 'left' });
+  x = dateEnd;
+  for (const t of textCols) {
+    cols.push({ key: t.key, label: COL_LABELS[t.key], x, width: t.width, align: 'left' });
+    x += t.width + gap;
+  }
+  let ax = firstAmountX;
+  for (const a of amounts) {
+    cols.push({ key: a.key, label: COL_LABELS[a.key], x: ax, width: a.width, align: 'right' });
+    ax += a.width + gap;
+  }
+  return cols;
+}
+
+/** Grey column-header band with a brand underline. */
+function drawTableHeader(r: Renderer, cols: Column[]): void {
+  r.ensure(34);
+  const y = r.y;
+  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 17, color: LIGHT });
+  for (const col of cols) {
+    const label = r.ellipsize(col.label, r.bold, 8, col.width - 2);
+    if (col.align === 'right') r.drawRight(label, col.x + col.width, y, 8, r.bold, DARK);
+    else r.draw(label, col.x, y, 8, r.bold, DARK);
+  }
+  r.y = y - 19;
+  r.page.drawRectangle({ x: MARGIN, y: r.y, width: CONTENT_W, height: 1.4, color: BRAND });
+  r.y -= 9;
+}
+
+function drawMonthHeader(r: Renderer, label: string): void {
+  r.ensure(30);
+  const y = r.y;
+  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 15, color: LIGHT });
+  r.draw(label, MARGIN + 8, y, 9.5, r.bold, BRAND);
+  r.y = y - 18;
+}
+
+type StatementEntry = StatementReport['months'][number]['entries'][number];
+
+/** One ledger row. Description and Notes are independent left-aligned columns
+ *  that each wrap to a second line; the row height fits the taller of the two. */
+function drawStatementRow(r: Renderer, cols: Column[], include: StatementInclude, entry: StatementEntry, zebra: boolean): void {
+  const descCol = cols.find((c) => c.key === 'desc');
+  const notesCol = cols.find((c) => c.key === 'notes');
+  const descLines = descCol ? r.fit(entry.description, r.regular, 9.5, descCol.width - 2, 2) : [];
+  const noteLines = notesCol && entry.note ? r.fit(entry.note, r.regular, 8.5, notesCol.width - 2, 2) : [];
+  const extra = Math.max(0, descLines.length - 1, noteLines.length - 1);
+  const rowH = 16 + extra * 11;
+  r.ensure(rowH + 4);
+
+  const y = r.y;
+  if (zebra) r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: rowH, color: LIGHT });
+  for (const col of cols) {
+    if (col.key === 'date') {
+      r.draw(formatISOToDisplay(entry.date), col.x, y, 9.5, r.regular, DARK);
+    } else if (col.key === 'desc') {
+      descLines.forEach((line, i) => r.draw(line, col.x, y - i * 11, 9.5, r.regular, DARK));
+    } else if (col.key === 'notes') {
+      noteLines.forEach((line, i) => r.draw(line, col.x, y - i * 11, 8.5, r.regular, GRAY));
+    } else if (col.key === 'debit') {
+      if (entry.debit > 0) r.drawRight(r.money(entry.debit, r.regular), col.x + col.width, y, 9.5, r.regular, DARK);
+      else r.drawRight('—', col.x + col.width, y, 9.5, r.regular, MUTED);
+    } else if (col.key === 'credit') {
+      if (entry.credit > 0) r.drawRight(r.money(entry.credit, r.regular), col.x + col.width, y, 9.5, r.regular, DARK);
+      else r.drawRight('—', col.x + col.width, y, 9.5, r.regular, MUTED);
+    } else if (col.key === 'running') {
+      r.drawRight(r.money(entry.runningBalance, r.regular), col.x + col.width, y, 9.5, r.regular, DARK);
+    }
+  }
+  r.y = y - rowH;
+}
+
+function drawMonthTotals(
+  r: Renderer,
+  cols: Column[],
+  label: string,
+  debit: number,
+  credit: number,
+  running?: number
+): void {
+  r.ensure(24);
+  const y = r.y;
+  r.page.drawRectangle({ x: MARGIN, y: y + 2, width: CONTENT_W, height: 0.8, color: BORDER });
+  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 16, color: LIGHT });
+  r.draw(label, MARGIN + 8, y, 9.5, r.bold, DARK);
+  for (const col of cols) {
+    if (col.key === 'debit') r.drawRight(r.money(debit, r.bold), col.x + col.width, y, 9.5, r.bold, DARK);
+    else if (col.key === 'credit') r.drawRight(r.money(credit, r.bold), col.x + col.width, y, 9.5, r.bold, DARK);
+    else if (col.key === 'running' && running !== undefined)
+      r.drawRight(r.money(running, r.bold), col.x + col.width, y, 9.5, r.bold, DARK);
+  }
+  r.y = y - 18;
+}
+
+function drawGrandTotal(r: Renderer, cols: Column[], report: StatementReport): void {
+  r.ensure(26);
+  const y = r.y;
+  r.page.drawRectangle({ x: MARGIN, y: y + 4, width: CONTENT_W, height: 1.6, color: BRAND });
+  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 18, color: LIGHT });
+  r.draw('Grand Total', MARGIN + 8, y, 10.5, r.bold, DARK);
+  const netColor = report.netBalance >= 0 ? BRAND : RED;
+  for (const col of cols) {
+    if (col.key === 'debit') r.drawRight(r.money(report.totalDebit, r.bold), col.x + col.width, y, 10.5, r.bold, DARK);
+    else if (col.key === 'credit') r.drawRight(r.money(report.totalCredit, r.bold), col.x + col.width, y, 10.5, r.bold, DARK);
+    else if (col.key === 'running') r.drawRight(r.money(report.netBalance, r.bold), col.x + col.width, y, 10.5, r.bold, netColor);
+  }
+  r.y = y - 22;
+}
+
+function drawEmptyTable(r: Renderer, message: string): void {
+  r.drawCentered(message, PAGE_W / 2, r.y - 4, 10.5, r.regular, GRAY);
+  r.y -= 22;
+}
+
+/** Party name + kind/phone + report period + generated timestamp. */
+function drawPartyBlock(r: Renderer, report: StatementReport): void {
+  const kind = report.party.type === 'customer' ? 'Customer' : 'Supplier';
+  const nameLines = r.fit(report.party.name, r.bold, 15, CONTENT_W, 2);
+  nameLines.forEach((line, i) => r.draw(line, MARGIN, r.y - i * 16, 15, r.bold, DARK));
+  r.y -= nameLines.length * 16 + 4;
+  const meta = report.party.phone ? `${kind}  •  ${report.party.phone}` : kind;
+  r.draw(meta, MARGIN, r.y, 10, r.regular, GRAY);
+  r.y -= 15;
+  r.draw(`Report period:  ${formatReportRange(report.from, report.to)}`, MARGIN, r.y, 9.5, r.regular, GRAY);
+  r.y -= 13;
+  r.draw(`Generated:  ${formatDateTime(report.generatedAt)}`, MARGIN, r.y, 9.5, r.regular, GRAY);
+  r.y -= 18;
+}
+
+/** Renders a full statement report (used by buildStatementReportPdf). */
+function renderStatement(r: Renderer, report: StatementReport, include: StatementInclude): void {
+  const kind = report.party.type === 'customer' ? 'Customer' : 'Supplier';
+  drawBrandHeader(r, `${kind} Statement`);
+  drawPartyBlock(r, report);
+  drawFiguresBox(r, 'Summary', [
+    { label: 'Total Debit (Out)', value: r.money(report.totalDebit) },
+    { label: 'Total Credit (In)', value: r.money(report.totalCredit) },
+    { label: 'Net Balance', value: r.money(report.netBalance), color: report.netBalance >= 0 ? BRAND : RED },
+  ]);
+
+  const cols = buildColumns(include);
+  let currentMonth = '';
+  r.onPageBreak = () => {
+    drawTableHeader(r, cols);
+    if (currentMonth) drawMonthHeader(r, currentMonth);
+  };
+  drawTableHeader(r, cols);
+
+  if (report.months.length === 0) {
+    drawEmptyTable(r, 'No entries recorded in this period.');
+  } else {
+    let zebra = false;
+    for (const month of report.months) {
+      currentMonth = month.label;
+      const pageBefore = r.page;
+      r.ensure(30);
+      // If ensure() broke onto a fresh page, onPageBreak already drew the table
+      // header and this month's header — drawing it again stacks a duplicate.
+      if (r.page === pageBefore) drawMonthHeader(r, month.label);
+      const last = month.entries[month.entries.length - 1];
+      for (const entry of month.entries) {
+        drawStatementRow(r, cols, include, entry, zebra);
+        zebra = !zebra;
+      }
+      drawMonthTotals(r, cols, `Month Total — ${month.label}`, month.debit, month.credit, include.runningBalance ? last.runningBalance : undefined);
+      r.y -= 6;
+    }
+  }
+  r.onPageBreak = undefined;
+  if (report.months.length > 0) drawGrandTotal(r, cols, report);
+}
+
+/* ---------------------------------------------------------------------------
+ * Font embedding
+ * ------------------------------------------------------------------------- */
+
+async function embedFonts(doc: PDFDocument): Promise<{ regular: PDFFont; bold: PDFFont; rupee: boolean }> {
+  const bytes = await getPdfFontBytes();
+  if (bytes) {
+    try {
+      doc.registerFontkit(fontkit);
+      const regular = await doc.embedFont(bytes.regular);
+      const bold = await doc.embedFont(bytes.bold);
+      return { regular, bold, rupee: true };
+    } catch {
+      // fall through to built-in fonts below
+    }
+  }
+  const regular = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  return { regular, bold, rupee: false };
+}
+
+/* ---------------------------------------------------------------------------
+ * Transactions report (quick range — Today / Yesterday / This Week / This Month / This Year / Custom)
+ * ------------------------------------------------------------------------- */
+
+export interface TransactionsPdfInput {
+  /** Inclusive `YYYY-MM-DD` lower bound. */
+  dateFrom: string;
+  /** Inclusive `YYYY-MM-DD` upper bound. */
+  dateTo: string;
+  /** Chronological feed (oldest first). */
+  entries: LedgerRow[];
+}
+
+/** Renders a "Transactions Report" with a summary box and a Date | Type | Note | Category/Account | Amount table. */
+export async function buildTransactionsPdf(input: TransactionsPdfInput): Promise<Uint8Array> {
+  const { dateFrom, dateTo, entries } = input;
+  const doc = await PDFDocument.create();
+  const { regular, bold, rupee } = await embedFonts(doc);
+  const r = new Renderer(doc, regular, bold, rupee);
+  r.onPageBreak = undefined;
+
+  drawBrandHeader(r, 'Transactions Report', formatReportRange(dateFrom, dateTo));
+
+  // Summary figures (Income / Expense / Net)
+  let totalIncome = 0;
+  let totalExpense = 0;
+  for (const e of entries) {
+    if (e.kind === 'income') totalIncome += e.amount;
+    else if (e.kind === 'expense') totalExpense += e.amount;
+    // transfers and opening balance are ignored for the summary
+  }
+  const net = totalIncome - totalExpense;
+  drawFiguresBox(r, 'Summary', [
+    { label: 'Total Income', value: r.money(totalIncome), color: BRAND },
+    { label: 'Total Expense', value: r.money(totalExpense), color: RED },
+    { label: 'Net Balance', value: r.money(net), color: net >= 0 ? BRAND : RED },
+  ]);
+
+  // Table columns: Date | Note | Category/Account | Amount
+  const cols: Column[] = [
+    { key: 'date', label: 'Date', x: MARGIN, width: 60, align: 'left' },
+    { key: 'note', label: 'Note', x: MARGIN + 68, width: 200, align: 'left' },
+    { key: 'cat', label: 'Category / Account', x: MARGIN + 276, width: 180, align: 'left' },
+    { key: 'amount', label: 'Amount', x: MARGIN + 464, width: 43, align: 'right' },
+  ];
+
+  drawTableHeader(r, cols);
+
+  if (entries.length === 0) {
+    drawEmptyTable(r, 'No transactions in this range.');
+  } else {
+    let zebra = false;
+    for (const entry of entries) {
+      drawTransactionRow(r, cols, entry, zebra);
+      zebra = !zebra;
+    }
+    // Totals row
+    drawTransactionTotals(r, cols, totalIncome);
+  }
+
+  addFooters(r);
+  return doc.save();
+}
+
+/** Category / Account fallback string for the transactions table. */
+function rowCategoryAccount(entry: LedgerRow): string {
+  if (entry.entryKind === 'opening') return entry.categoryName ?? entry.accountName ?? '';
+  if (entry.kind === 'transfer') {
+    return `${entry.fromAccountName ?? ''} → ${entry.toAccountName ?? ''}`;
+  }
+  return entry.categoryName ?? entry.accountName ?? '';
+}
+
+/** One transactions-report row. Amount is signed & colored: income +BRAND, expense −RED, transfer/opening plain DARK. */
+function drawTransactionRow(r: Renderer, cols: Column[], entry: LedgerRow, zebra: boolean): void {
+  const catAcc = rowCategoryAccount(entry);
+  const isIncome = entry.kind === 'income';
+  const isExpense = entry.kind === 'expense';
+
+  let amountText = '';
+  let amountColor: RenderColor = DARK;
+  if (isIncome) {
+    amountText = '+' + r.money(entry.amount, r.regular);
+    amountColor = BRAND;
+  } else if (isExpense) {
+    amountText = '-' + r.money(entry.amount, r.regular);
+    amountColor = RED;
+  } else {
+    amountText = r.money(entry.amount, r.regular);
+    amountColor = DARK;
+  }
+
+  // Note column falls back to category/account when empty
+  const noteText = entry.note || catAcc;
+
+  r.ensure(22);
+  const y = r.y;
+  if (zebra) r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 16, color: LIGHT });
+
+  // Date
+  r.draw(formatISOToDisplay(entry.date), cols[0].x, y, 9.5, r.regular, DARK);
+  // Note (wraps to 2 lines max)
+  const noteLines = r.fit(noteText, r.regular, 9.5, cols[1].width - 2, 2);
+  noteLines.forEach((line, i) => r.draw(line, cols[1].x, y - i * 10, 9.5, r.regular, DARK));
+  // Category/Account (wraps to 2 lines max)
+  const catLines = r.fit(catAcc, r.regular, 8.5, cols[2].width - 2, 2);
+  catLines.forEach((line, i) => r.draw(line, cols[2].x, y - i * 10, 8.5, r.regular, GRAY));
+  // Amount (right aligned)
+  r.drawRight(amountText, cols[3].x + cols[3].width, y, 9.5, r.regular, amountColor);
+
+  r.y = y - 20;
+}
+
+/** Totals row at the bottom of the transactions table. */
+function drawTransactionTotals(r: Renderer, cols: Column[], totalIncome: number): void {
+  r.ensure(26);
+  const y = r.y;
+  r.page.drawRectangle({ x: MARGIN, y: y + 2, width: CONTENT_W, height: 0.8, color: BORDER });
+  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 16, color: LIGHT });
+
+  r.draw('Totals', MARGIN + 8, y, 9.5, r.bold, DARK);
+  r.drawRight(r.money(totalIncome), cols[3].x + cols[3].width, y, 9.5, r.bold, BRAND);
+
+  r.y = y - 22;
+}
+
+/* ---------------------------------------------------------------------------
+ * Public builders
+ * ------------------------------------------------------------------------- */
 
 interface MonthlyPdfInput {
   /** 0-indexed month. */
@@ -61,71 +735,58 @@ interface MonthlyPdfInput {
   report: MonthReport;
 }
 
-export async function buildMonthlyReportPdf({
-  year,
-  month,
-  report,
-}: MonthlyPdfInput): Promise<Uint8Array> {
+export async function buildMonthlyReportPdf({ year, month, report }: MonthlyPdfInput): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { regular, bold, rupee } = await embedFonts(doc);
+  const r = new Renderer(doc, regular, bold, rupee);
+  r.onPageBreak = undefined;
+  drawBrandHeader(r, 'Monthly Report', monthLabel(year, month));
+  const profit = report.summary.income - report.summary.expense;
+  drawFiguresBox(r, 'Summary', [
+    { label: 'Total Income', value: r.money(report.summary.income), color: BRAND },
+    { label: 'Total Expense', value: r.money(report.summary.expense), color: RED },
+    { label: 'Net Balance', value: r.money(profit), color: profit >= 0 ? BRAND : RED },
+  ]);
+  drawCategorySection(r, 'Top Expenses', report.expenses, RED);
+  drawCategorySection(r, 'Top Income', report.incomes, BRAND);
+  addFooters(r);
+  return doc.save();
+}
 
-  let page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  let y = PAGE_HEIGHT - MARGIN;
-
-  /** Draws a line of text, moving to a fresh page when the bottom is near. */
-  const line = (text: string, size: number, f: PDFFont, color: ReturnType<typeof rgb>, gap: number) => {
-    if (y < MARGIN + 20) {
-      page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-      y = PAGE_HEIGHT - MARGIN;
-    }
-    page.drawText(sanitize(text), { x: MARGIN, y, size, font: f, color });
-    y -= gap;
-  };
-
-  // Header
-  line('DailyKhata', 24, bold, DARK, 6);
-  line(`Monthly Report - ${monthLabel(year, month)}`, 13, font, GRAY, 18);
-  page.drawRectangle({ x: MARGIN, y, width: PAGE_WIDTH - MARGIN * 2, height: 1, color: GRAY });
-  y -= 24;
-
-  // Summary
-  const { summary } = report;
-  const profit = summary.income - summary.expense;
-  line('Summary', 16, bold, DARK, 10);
-  line(`Income   ${rupees(summary.income)}`, 13, font, GREEN, 22);
-  line(`Expense  ${rupees(summary.expense)}`, 13, font, RED, 22);
-  line(`Profit   ${rupees(profit)}`, 13, bold, profit >= 0 ? GREEN : RED, 30);
-
-  // Category breakdowns
-  const sections: { title: string; items: MonthReport['expenses']; color: ReturnType<typeof rgb> }[] = [
-    { title: 'Top Expenses', items: report.expenses, color: RED },
-    { title: 'Top Income', items: report.incomes, color: GREEN },
-  ];
-
-  for (const section of sections) {
-    line(section.title, 16, bold, DARK, 10);
-    if (section.items.length === 0) {
-      line('Nothing recorded.', 12, font, GRAY, 26);
-    } else {
-      for (const item of section.items) {
-        if (y < MARGIN + 24) {
-          page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-          y = PAGE_HEIGHT - MARGIN;
-        }
-        page.drawText(sanitize(item.name), { x: MARGIN, y, size: 12, font, color: DARK });
-        const amount = rupees(item.total);
-        const width = font.widthOfTextAtSize(amount, 12);
-        page.drawText(sanitize(amount), { x: PAGE_WIDTH - MARGIN - width, y, size: 12, font, color: section.color });
-        y -= 20;
-      }
-    }
-    y -= 8;
+function drawCategorySection(
+  r: Renderer,
+  title: string,
+  items: MonthReport['expenses'],
+  color: RenderColor
+): void {
+  r.ensure(26);
+  r.draw(title, MARGIN, r.y, 12, r.bold, DARK);
+  r.y -= 10;
+  if (items.length === 0) {
+    r.draw('Nothing recorded.', MARGIN, r.y, 10, r.regular, GRAY);
+    r.y -= 22;
+    return;
   }
+  for (const item of items) {
+    r.ensure(16);
+    const name = r.ellipsize(item.name, r.regular, 10, CONTENT_W - 130);
+    r.draw(name, MARGIN, r.y, 10, r.regular, DARK);
+    r.drawRight(r.money(item.total), PAGE_W - MARGIN, r.y, 10, r.regular, color);
+    r.y -= 17;
+  }
+  r.y -= 6;
+}
 
-  // Footer
-  line('Generated by DailyKhata - all amounts in rupees.', 10, font, GRAY, 0);
-
+export async function buildStatementReportPdf(
+  report: StatementReport,
+  include: StatementInclude = DEFAULT_STATEMENT_INCLUDE
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const { regular, bold, rupee } = await embedFonts(doc);
+  const r = new Renderer(doc, regular, bold, rupee);
+  r.onPageBreak = undefined;
+  renderStatement(r, report, include);
+  addFooters(r);
   return doc.save();
 }
 
@@ -133,331 +794,28 @@ interface PartyStatementPdfInput {
   name: string;
   phone: string;
   type: PartyType;
-  openingBalance: number;
   /** Kept for callers that pass it; the report is rebuilt from `ledger`. */
   balance?: number;
   ledger: PartyTransaction[];
+  /** Which columns/rows to include; defaults to all on. */
+  include?: StatementInclude;
 }
 
 /**
  * Convenience wrapper used by the party screen's quick "Share PDF" action.
  * Builds a full statement report from the party's in-memory ledger and renders
- * it with `buildStatementReportPdf` (all-time, all options on).
+ * it with `buildStatementReportPdf` (all-time; `include` defaults to all on).
  */
 export async function buildPartyStatementPdf({
   name,
   phone,
   type,
-  openingBalance,
   ledger,
+  include = DEFAULT_STATEMENT_INCLUDE,
 }: PartyStatementPdfInput): Promise<Uint8Array> {
-  const party: Party = { id: 0, name, phone, type, openingBalance };
+  const party: Party = { id: 0, name, phone, type, openingBalance: 0 };
   const report = computeStatementReport(party, ledger);
-  return buildStatementReportPdf(report, DEFAULT_STATEMENT_INCLUDE);
-}
-
-/* ---------------------------------------------------------------------------
- * Statement report PDF (Khatabook-style customer statement)
- * ------------------------------------------------------------------------- */
-
-const BRAND = rgb(0.086, 0.639, 0.29); // ~ #16A34A (app primary green)
-const LIGHT = rgb(0.965, 0.973, 0.968); // zebra / panel fill
-const BORDER = rgb(0.82, 0.85, 0.84);
-const COL_DATE = 62;
-const COL_AMOUNT = 80;
-const COL_RUNNING = 92;
-const CELL_GAP = 8;
-
-const DEFAULT_STATEMENT_INCLUDE: StatementInclude = {
-  entryDetails: true,
-  notes: true,
-  runningBalance: true,
-  openingBalance: true,
-};
-
-interface ReportColumn {
-  key: string;
-  label: string;
-  x: number;
-  width: number;
-  align: 'left' | 'right';
-}
-
-/** Computes the statement table columns, honoring the include flags. */
-function statementColumns(
-  include: StatementInclude
-): ReportColumn[] {
-  const cols: ReportColumn[] = [];
-  let x = MARGIN;
-  const push = (key: string, label: string, width: number, align: 'left' | 'right' = 'left') => {
-    cols.push({ key, label, x, width, align });
-    x += width + CELL_GAP;
-  };
-
-  push('date', 'Date', COL_DATE);
-  if (include.entryDetails) {
-    push('desc', 'Description', 0); // width fixed up after the fixed columns
-  }
-  push('debit', 'Debit (You Gave)', COL_AMOUNT, 'right');
-  push('credit', 'Credit (You Got)', COL_AMOUNT, 'right');
-  if (include.runningBalance) {
-    push('running', 'Running Balance', COL_RUNNING, 'right');
-  }
-
-  const desc = cols.find((c) => c.key === 'desc');
-  if (desc) {
-    const next = cols[cols.indexOf(desc) + 1];
-    desc.width = next ? next.x - CELL_GAP - desc.x : PAGE_WIDTH - MARGIN - desc.x;
-  }
-  return cols;
-}
-
-/** Shortens text so it fits a column width (Helvetica has no word wrap). */
-function fit(font: PDFFont, text: string, size: number, maxWidth: number): string {
-  const safe = sanitize(text);
-  if (font.widthOfTextAtSize(safe, size) <= maxWidth) {
-    return safe;
-  }
-  let out = safe;
-  while (out.length > 1 && font.widthOfTextAtSize(`${out.slice(0, -1)}…`, size) > maxWidth) {
-    out = out.slice(0, -1);
-  }
-  return `${out.slice(0, -1)}…`;
-}
-
-/**
- * A polished, printable A4 party statement, modelled on a Khatabook customer
- * statement and branded for DailyKhata:
- *
- *   logo + business info header  ·  party name & phone  ·  report period &
- *   generated datetime  ·  summary box (opening / debit / credit / net)  ·
- *   statement table grouped by month with monthly + grand totals  ·  page
- *   numbers  ·  all amounts in rupees.
- */
-export async function buildStatementReportPdf(
-  report: StatementReport,
-  include: StatementInclude = DEFAULT_STATEMENT_INCLUDE
-): Promise<Uint8Array> {
-  const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const cols = statementColumns(include);
-
-  let page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  let y = PAGE_HEIGHT - MARGIN;
-
-  const rightAligned = (text: string, size: number, f: PDFFont, color: ReturnType<typeof rgb>, right: number) => {
-    const safe = sanitize(text);
-    const width = f.widthOfTextAtSize(safe, size);
-    page.drawText(safe, { x: right - width, y, size, font: f, color });
-  };
-  const cellRight = (col: ReportColumn, text: string, size: number, f: PDFFont, color: ReturnType<typeof rgb>) => {
-    const safe = sanitize(text);
-    const width = f.widthOfTextAtSize(safe, size);
-    page.drawText(safe, { x: col.x + col.width - width, y, size, font: f, color });
-  };
-
-  /** Starts a fresh page and redraws the running table headers. */
-  const pageBreak = (currentMonthLabel?: string) => {
-    page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-    y = PAGE_HEIGHT - MARGIN;
-    drawTableHeader();
-    if (currentMonthLabel) {
-      drawMonthHeader(currentMonthLabel);
-    }
-  };
-
-  const ensureSpace = (needed: number, currentMonthLabel?: string) => {
-    if (y - needed < MARGIN + 28) {
-      pageBreak(currentMonthLabel);
-    }
-  };
-
-  const drawTableHeader = () => {
-    page.drawRectangle({ x: MARGIN, y: y - 4, width: CONTENT_WIDTH, height: 18, color: LIGHT });
-    for (const col of cols) {
-      if (col.align === 'right') {
-        rightAligned(col.label, 9, bold, DARK, col.x + col.width);
-      } else {
-        page.drawText(sanitize(col.label), { x: col.x, y, size: 9, font: bold, color: DARK });
-      }
-    }
-    y -= 22;
-    page.drawRectangle({ x: MARGIN, y, width: CONTENT_WIDTH, height: 1.2, color: BRAND });
-    y -= 10;
-  };
-
-  const drawMonthHeader = (label: string) => {
-    page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_WIDTH, height: 16, color: LIGHT });
-    page.drawText(sanitize(label), { x: MARGIN + 8, y, size: 10.5, font: bold, color: BRAND });
-    y -= 20;
-  };
-
-  const drawTotalsRow = (label: string, debit: number, credit: number, running?: number) => {
-    page.drawText(sanitize(label), { x: MARGIN + 8, y, size: 9.5, font: bold, color: DARK });
-    for (const col of cols) {
-      if (col.key === 'debit') cellRight(col, rupees(debit), 9.5, bold, DARK);
-      if (col.key === 'credit') cellRight(col, rupees(credit), 9.5, bold, DARK);
-      if (col.key === 'running' && running !== undefined) cellRight(col, rupees(running), 9.5, bold, DARK);
-    }
-    y -= 12;
-  };
-
-  // ===== Header band: logo + brand + report title =====
-  const cx = MARGIN + 14;
-  const cy = y - 14;
-  page.drawEllipse({ x: cx, y: cy, xScale: 14, yScale: 14, color: BRAND });
-  const logoText = 'DK';
-  const logoWidth = bold.widthOfTextAtSize(logoText, 12);
-  page.drawText(sanitize(logoText), { x: cx - logoWidth / 2, y: cy - 4.5, size: 12, font: bold, color: rgb(1, 1, 1) });
-
-  page.drawText(sanitize('DailyKhata'), { x: MARGIN + 34, y, size: 22, font: bold, color: DARK });
-  page.drawText(sanitize('Your khata ledger, made simple'), { x: MARGIN + 34, y: y - 16, size: 9, font, color: GRAY });
-
-  const kind = report.party.type === 'customer' ? 'Customer' : 'Supplier';
-  const title = `${kind} Statement`;
-  const titleWidth = bold.widthOfTextAtSize(title, 14);
-  page.drawText(sanitize(title), { x: PAGE_WIDTH - MARGIN - titleWidth, y: y - 4, size: 14, font: bold, color: BRAND });
-
-  y -= 46;
-  page.drawRectangle({ x: MARGIN, y, width: CONTENT_WIDTH, height: 2.5, color: BRAND });
-  y -= 18;
-
-  // ===== Party + meta =====
-  page.drawText(sanitize(report.party.name), { x: MARGIN, y, size: 16, font: bold, color: DARK });
-  y -= 20;
-  const partyLine = report.party.phone ? `${kind}  •  ${report.party.phone}` : kind;
-  page.drawText(sanitize(partyLine), { x: MARGIN, y, size: 11, font, color: GRAY });
-  y -= 18;
-  page.drawText(sanitize(`Report period:  ${formatReportRange(report.from, report.to)}`), { x: MARGIN, y, size: 10, font, color: GRAY });
-  y -= 14;
-  page.drawText(sanitize(`Generated:  ${formatDateTime(report.generatedAt)}`), { x: MARGIN, y, size: 10, font, color: GRAY });
-  y -= 20;
-
-  // ===== Summary box =====
-  const figures: { label: string; value: string; color?: ReturnType<typeof rgb> }[] = [];
-  if (include.openingBalance) {
-    figures.push({ label: 'Opening Balance', value: rupees(report.openingBalance) });
-  }
-  figures.push({ label: 'Total Debit (You Gave)', value: rupees(report.totalDebit) });
-  figures.push({ label: 'Total Credit (You Got)', value: rupees(report.totalCredit) });
-  figures.push({
-    label: 'Net Balance',
-    value: rupees(report.netBalance),
-    color: report.netBalance >= 0 ? BRAND : RED,
-  });
-
-  const figCols = include.openingBalance ? 2 : 3;
-  const figRows = Math.ceil(figures.length / figCols);
-  const boxPad = 14;
-  const boxTitleH = 20;
-  const boxRowH = 36;
-  const boxHeight = boxPad + boxTitleH + figRows * boxRowH + boxPad;
-
-  page.drawRectangle({ x: MARGIN, y: y - boxHeight, width: CONTENT_WIDTH, height: boxHeight, color: LIGHT });
-  page.drawRectangle({ x: MARGIN, y: y - boxHeight, width: CONTENT_WIDTH, height: boxHeight, borderColor: BORDER, borderWidth: 1 });
-  page.drawText(sanitize('Summary'), { x: MARGIN + boxPad, y: y - boxPad - 12, size: 12, font: bold, color: DARK });
-
-  const cellW = (CONTENT_WIDTH - boxPad * 2) / figCols;
-  figures.forEach((fig, index) => {
-    const row = Math.floor(index / figCols);
-    const col = index % figCols;
-    const fx = MARGIN + boxPad + col * cellW;
-    const fy = y - boxPad - boxTitleH - row * boxRowH;
-    page.drawText(sanitize(fig.label), { x: fx, y: fy, size: 8.5, font, color: GRAY });
-    const safeValue = sanitize(fig.value);
-    const valueWidth = bold.widthOfTextAtSize(safeValue, 13);
-    page.drawText(safeValue, { x: fx + cellW - valueWidth, y: fy - 16, size: 13, font: bold, color: fig.color ?? DARK });
-  });
-
-  y = y - boxHeight - 22;
-
-  // ===== Statement table =====
-  drawTableHeader();
-
-  if (include.openingBalance) {
-    ensureSpace(18);
-    const descCol = cols.find((c) => c.key === 'desc');
-    page.drawText(sanitize(formatISOToDisplay(report.from || report.to) || '—'), { x: cols[0].x, y, size: 10, font, color: DARK });
-    if (descCol) {
-      page.drawText(sanitize('Opening Balance'), { x: descCol.x, y, size: 10, font, color: GRAY });
-    }
-    const runningCol = cols.find((c) => c.key === 'running');
-    if (runningCol) {
-      cellRight(runningCol, rupees(report.openingBalance), 10, bold, DARK);
-    }
-    y -= 16;
-  }
-
-  if (report.months.length === 0) {
-    page.drawText(sanitize('No entries recorded in this period.'), { x: MARGIN, y: y - 4, size: 11, font, color: GRAY });
-  } else {
-    for (let m = 0; m < report.months.length; m++) {
-      const month = report.months[m];
-      ensureSpace(24, month.label);
-      drawMonthHeader(month.label);
-
-      for (const entry of month.entries) {
-        const rowH = 16 + (include.notes && entry.note ? 12 : 0);
-        ensureSpace(rowH + 8, month.label);
-        // Zebra stripe for readability.
-        if (m % 2 === 0) {
-          page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_WIDTH, height: rowH, color: LIGHT });
-        }
-        for (const col of cols) {
-          if (col.key === 'date') {
-            page.drawText(sanitize(formatISOToDisplay(entry.date)), { x: col.x, y, size: 10, font, color: DARK });
-          } else if (col.key === 'desc') {
-            page.drawText(fit(font, entry.description, 10, col.width), { x: col.x, y, size: 10, font, color: DARK });
-            if (include.notes && entry.note) {
-              page.drawText(fit(font, entry.note, 8.5, col.width), { x: col.x, y: y - 11, size: 8.5, font, color: GRAY });
-            }
-          } else if (col.key === 'debit' && entry.debit > 0) {
-            cellRight(col, rupees(entry.debit), 10, font, DARK);
-          } else if (col.key === 'credit' && entry.credit > 0) {
-            cellRight(col, rupees(entry.credit), 10, font, DARK);
-          } else if (col.key === 'running') {
-            cellRight(col, rupees(entry.runningBalance), 10, font, DARK);
-          }
-        }
-        y -= rowH;
-      }
-
-      // Month subtotal.
-      ensureSpace(20, month.label);
-      page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_WIDTH, height: 1, color: BORDER });
-      y -= 8;
-      const monthEnd = month.entries[month.entries.length - 1].runningBalance;
-      drawTotalsRow(`Month Total — ${month.label}`, month.debit, month.credit, include.runningBalance ? monthEnd : undefined);
-      y -= 6;
-    }
-  }
-
-  // ===== Grand total =====
-  ensureSpace(30);
-  page.drawRectangle({ x: MARGIN, y: y + 6, width: CONTENT_WIDTH, height: 1.6, color: BRAND });
-  page.drawRectangle({ x: MARGIN, y: y - 6, width: CONTENT_WIDTH, height: 18, color: LIGHT });
-  page.drawText(sanitize('Grand Total'), { x: MARGIN + 8, y, size: 10.5, font: bold, color: DARK });
-  for (const col of cols) {
-    if (col.key === 'debit') cellRight(col, rupees(report.totalDebit), 10.5, bold, DARK);
-    if (col.key === 'credit') cellRight(col, rupees(report.totalCredit), 10.5, bold, DARK);
-    if (col.key === 'running') {
-      const color = report.netBalance >= 0 ? BRAND : RED;
-      cellRight(col, rupees(report.netBalance), 10.5, bold, color);
-    }
-  }
-  y -= 26;
-
-  // ===== Footer page numbers (drawn last, on every page) =====
-  const pages = doc.getPages();
-  pages.forEach((pageNumber, index) => {
-    pageNumber.drawText(sanitize('DailyKhata'), { x: MARGIN, y: 30, size: 9, font, color: GRAY });
-    const label = `Page ${index + 1} of ${pages.length}`;
-    const width = font.widthOfTextAtSize(label, 9);
-    pageNumber.drawText(sanitize(label), { x: (PAGE_WIDTH - width) / 2, y: 30, size: 9, font, color: GRAY });
-  });
-
-  return doc.save();
+  return buildStatementReportPdf(report, include);
 }
 
 interface CombinedPdfInput {
@@ -474,203 +832,106 @@ interface CombinedPdfInput {
  * A combined PDF with the monthly summary report followed by each party's
  * statement. Useful for sending a single file to an accountant.
  */
-export async function buildCombinedPdf({
-  year,
-  month,
-  report,
-  parties,
-}: CombinedPdfInput): Promise<Uint8Array> {
+export async function buildCombinedPdf({ year, month, report, parties }: CombinedPdfInput): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { regular, bold, rupee } = await embedFonts(doc);
+  const r = new Renderer(doc, regular, bold, rupee);
+  r.onPageBreak = undefined;
 
-  let page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  let y = PAGE_HEIGHT - MARGIN;
+  // ===== Monthly report section =====
+  drawBrandHeader(r, 'Monthly Report', monthLabel(year, month));
+  const profit = report.summary.income - report.summary.expense;
+  drawFiguresBox(r, 'Summary', [
+    { label: 'Income / Total Debit', value: r.money(report.summary.income), color: BRAND },
+    { label: 'Total Expense / Total Credit', value: r.money(report.summary.expense), color: RED },
+    { label: 'Net Balance', value: r.money(profit), color: profit >= 0 ? BRAND : RED },
+  ]);
+  drawCategorySection(r, 'Top Expenses', report.expenses, RED);
+  drawCategorySection(r, 'Top Income', report.incomes, BRAND);
+  r.ensure(26);
+  r.draw('Khata Summary', MARGIN, r.y, 12, r.bold, DARK);
+  r.y -= 10;
+  r.draw('Money Out', MARGIN, r.y, 10, r.regular, RED);
+  r.drawRight(r.money(report.party.given), PAGE_W - MARGIN, r.y, 10, r.regular, RED);
+  r.y -= 16;
+  r.draw('Money In', MARGIN, r.y, 10, r.regular, BRAND);
+  r.drawRight(r.money(report.party.received), PAGE_W - MARGIN, r.y, 10, r.regular, BRAND);
+  r.y -= 24;
 
-  /** Draws a line of text, moving to a fresh page when the bottom is near. */
-  const line = (text: string, size: number, f: PDFFont, color: ReturnType<typeof rgb>, gap: number) => {
-    if (y < MARGIN + 20) {
-      page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-      y = PAGE_HEIGHT - MARGIN;
-    }
-    page.drawText(sanitize(text), { x: MARGIN, y, size, font: f, color });
-    y -= gap;
-  };
+  // ===== Party statements section =====
+  r.newPage();
+  drawBrandHeader(r, 'Khata Statements');
 
-  // ===== MONTHLY REPORT SECTION =====
-  line('DailyKhata', 24, bold, DARK, 6);
-  line(`Monthly Report - ${monthLabel(year, month)}`, 13, font, GRAY, 18);
-  page.drawRectangle({ x: MARGIN, y, width: PAGE_WIDTH - MARGIN * 2, height: 1, color: GRAY });
-  y -= 24;
+  const customers = parties.filter((p) => p.type === 'customer');
+  const suppliers = parties.filter((p) => p.type === 'supplier');
 
-  // Summary
-  const { summary } = report;
-  const profit = summary.income - summary.expense;
-  line('Summary', 16, bold, DARK, 10);
-  line(`Income   ${rupees(summary.income)}`, 13, font, GREEN, 22);
-  line(`Expense  ${rupees(summary.expense)}`, 13, font, RED, 22);
-  line(`Profit   ${rupees(profit)}`, 13, bold, profit >= 0 ? GREEN : RED, 30);
-
-  // Category breakdowns
-  const sections: { title: string; items: MonthReport['expenses']; color: ReturnType<typeof rgb> }[] = [
-    { title: 'Top Expenses', items: report.expenses, color: RED },
-    { title: 'Top Income', items: report.incomes, color: GREEN },
-  ];
-
-  for (const section of sections) {
-    line(section.title, 16, bold, DARK, 10);
-    if (section.items.length === 0) {
-      line('Nothing recorded.', 12, font, GRAY, 26);
-    } else {
-      for (const item of section.items) {
-        if (y < MARGIN + 24) {
-          page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-          y = PAGE_HEIGHT - MARGIN;
-        }
-        page.drawText(sanitize(item.name), { x: MARGIN, y, size: 12, font, color: DARK });
-        const amount = rupees(item.total);
-        const width = font.widthOfTextAtSize(amount, 12);
-        page.drawText(sanitize(amount), { x: PAGE_WIDTH - MARGIN - width, y, size: 12, font, color: section.color });
-        y -= 20;
-      }
-    }
-    y -= 8;
+  if (customers.length > 0) {
+    r.ensure(22);
+    r.draw('Customers (They Owe You)', MARGIN, r.y, 12, r.bold, BRAND);
+    r.y -= 18;
+    for (const party of customers) await renderPartyStatement(r, party);
+    r.y -= 4;
+  }
+  if (suppliers.length > 0) {
+    r.ensure(22);
+    r.draw('Suppliers (You Owe Them)', MARGIN, r.y, 12, r.bold, RED);
+    r.y -= 18;
+    for (const party of suppliers) await renderPartyStatement(r, party);
+    r.y -= 4;
+  }
+  if (customers.length === 0 && suppliers.length === 0) {
+    drawEmptyTable(r, 'No parties to show.');
   }
 
-  // Khata summary
-  line('Khata Summary', 16, bold, DARK, 10);
-  line(`Money Given   ${rupees(report.party.given)}`, 13, font, RED, 22);
-  line(`Money Received ${rupees(report.party.received)}`, 13, font, GREEN, 30);
-
-  // Page break before party statements
-  page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  y = PAGE_HEIGHT - MARGIN;
-
-  // ===== PARTY STATEMENTS SECTION =====
-  line('DailyKhata', 24, bold, DARK, 6);
-  line('Khata Statements (All Parties)', 13, font, GRAY, 18);
-  page.drawRectangle({ x: MARGIN, y, width: PAGE_WIDTH - MARGIN * 2, height: 1, color: GRAY });
-  y -= 30;
-
-  const customerParties = parties.filter((p) => p.type === 'customer');
-  const supplierParties = parties.filter((p) => p.type === 'supplier');
-
-  // Process customers
-  if (customerParties.length > 0) {
-    line('Customers (They Owe You)', 16, bold, GREEN, 12);
-    for (const party of customerParties) {
-      y = await drawPartyStatement(doc, page, y, party, font, bold, 'customer');
-    }
-    y -= 8;
-  }
-
-  // Process suppliers
-  if (supplierParties.length > 0) {
-    line('Suppliers (You Owe Them)', 16, bold, RED, 12);
-    for (const party of supplierParties) {
-      y = await drawPartyStatement(doc, page, y, party, font, bold, 'supplier');
-    }
-    y -= 8;
-  }
-
-  // Footer
-  line('Generated by DailyKhata - all amounts in rupees.', 10, font, GRAY, 0);
-
+  addFooters(r);
   return doc.save();
 }
 
-/**
- * Draws a single party statement onto the document.
- * Returns the updated y position.
- */
-async function drawPartyStatement(
-  doc: PDFDocument,
-  page: import('pdf-lib').PDFPage,
-  y: number,
-  party: PartyBalance,
-  font: PDFFont,
-  bold: PDFFont,
-  type: PartyType
-): Promise<number> {
-  let currentY = y;
+/** Renders one party's compact statement for the combined PDF. */
+async function renderPartyStatement(r: Renderer, party: PartyBalance): Promise<void> {
+  const ledger = await listPartyTransactionsAsc(party.id);
+  const report = computeStatementReport(party, ledger);
+  const include: StatementInclude = { entryDetails: true, notes: true, runningBalance: true };
+  const receivable = isPartyReceivable(party.type, party.balance);
+  const balanceColor = receivable ? BRAND : RED;
+  const kind = party.type === 'customer' ? 'Customer' : 'Supplier';
 
-  // Check if we need a new page
-  if (currentY < MARGIN + 80) {
-    page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-    currentY = PAGE_HEIGHT - MARGIN;
-  }
+  r.ensure(40);
+  const nameLines = r.fit(party.name, r.bold, 13, CONTENT_W, 2);
+  nameLines.forEach((line, i) => r.draw(line, MARGIN, r.y - i * 14, 13, r.bold, DARK));
+  r.y -= nameLines.length * 14 + 3;
+  const meta = r.ellipsize(party.phone ? `${kind}  •  ${party.phone}` : kind, r.regular, 9.5, CONTENT_W - 150);
+  r.draw(meta, MARGIN, r.y, 9.5, r.regular, GRAY);
+  r.drawRight(r.money(party.balance), PAGE_W - MARGIN, r.y, 9.5, r.bold, balanceColor);
+  r.y -= 14;
 
-  const draw = (text: string, size: number, f: PDFFont, color: ReturnType<typeof rgb>, x = MARGIN) => {
-    page.drawText(sanitize(text), { x, y: currentY, size, font: f, color });
-    currentY -= size + 2;
+  const cols = buildColumns(include);
+  let currentMonth = '';
+  r.onPageBreak = () => {
+    drawTableHeader(r, cols);
+    if (currentMonth) drawMonthHeader(r, currentMonth);
   };
+  drawTableHeader(r, cols);
 
-  // Party header
-  draw(party.name, 14, bold, DARK);
-  const kind = type === 'customer' ? 'Customer' : 'Supplier';
-  draw(`${kind}${party.phone ? `  •  ${party.phone}` : ''}`, 11, font, GRAY);
-  currentY -= 8;
-
-  const isReceivable = party.balance > 0;
-  const balanceColor = isReceivable
-    ? type === 'customer'
-      ? GREEN
-      : RED
-    : type === 'customer'
-    ? RED
-    : GREEN;
-  draw('Outstanding', 11, bold, balanceColor);
-  draw(`${rupees(party.balance)}`, 11, bold, balanceColor, MARGIN + 150);
-  currentY -= 12;
-
-  // Load ledger entries for this party
-  const ledger = await listPartyTransactions(party.id);
-
-  if (ledger.length === 0) {
-    draw('No entries recorded.', 10, font, GRAY);
-    currentY -= 10;
-    return currentY;
-  }
-
-  // Table header
-  draw('Date', 10, bold, DARK);
-  draw('Entry', 10, bold, DARK, MARGIN + 80);
-  draw('Amount', 10, bold, DARK, PAGE_WIDTH - MARGIN - 100);
-  currentY -= 12;
-  page.drawRectangle({ x: MARGIN, y: currentY, width: PAGE_WIDTH - MARGIN * 2, height: 1, color: GRAY });
-  currentY -= 10;
-
-  for (const entry of ledger) {
-    if (currentY < MARGIN + 44) {
-      page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-      currentY = PAGE_HEIGHT - MARGIN;
+  if (report.months.length === 0) {
+    drawEmptyTable(r, 'No entries recorded.');
+  } else {
+    let zebra = false;
+    for (const month of report.months) {
+      currentMonth = month.label;
+      const pageBefore = r.page;
+      r.ensure(30);
+      if (r.page === pageBefore) drawMonthHeader(r, month.label);
+      const last = month.entries[month.entries.length - 1];
+      for (const entry of month.entries) {
+        drawStatementRow(r, cols, include, entry, zebra);
+        zebra = !zebra;
+      }
+      drawMonthTotals(r, cols, `Month Total — ${month.label}`, month.debit, month.credit, last.runningBalance);
+      r.y -= 6;
     }
-
-    const isOpening = entry.kind === 'opening';
-    const label = isOpening
-      ? 'Opening Balance'
-      : PARTY_ACTIONS[actionForDirection(type, entry.direction)].title;
-    const amountStr = `${entryIncreasesBalance(type, entry.direction) ? '+' : '-'}${rupees(entry.amount)}`;
-    const width = font.widthOfTextAtSize(amountStr, 10);
-
-    page.drawText(sanitize(entry.date), { x: MARGIN, y: currentY, size: 10, font, color: DARK });
-    page.drawText(sanitize(label), { x: MARGIN + 80, y: currentY, size: 10, font, color: GRAY });
-    page.drawText(sanitize(amountStr), { x: PAGE_WIDTH - MARGIN - width, y: currentY, size: 10, font: bold, color: entryIncreasesBalance(type, entry.direction) ? GREEN : RED });
-    currentY -= 14;
-
-    if (entry.note) {
-      page.drawText(sanitize(entry.note), { x: MARGIN + 80, y: currentY, size: 9, font, color: GRAY });
-      currentY -= 12;
-    }
-    currentY -= 4;
   }
-
-  currentY -= 6;
-  if (currentY > MARGIN) {
-    page.drawRectangle({ x: MARGIN, y: currentY, width: PAGE_WIDTH - MARGIN * 2, height: 1, color: GRAY });
-    currentY -= 12;
-    draw(`Outstanding balance   ${rupees(party.balance)}`, 11, bold, balanceColor);
-  }
-
-  return currentY;
+  r.onPageBreak = undefined;
+  if (report.months.length > 0) drawGrandTotal(r, cols, report);
+  r.y -= 16;
 }

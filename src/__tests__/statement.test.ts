@@ -28,7 +28,7 @@ function tx(
   amount: number,
   note = ''
 ): PartyTransaction {
-  return { id, partyId: 1, direction, amount, note, date, createdAt: date, kind: 'normal' };
+  return { id, partyId: 1, direction, amount, note, date, time: '10:30', createdAt: date, kind: 'normal' };
 }
 
 /**
@@ -44,6 +44,7 @@ function openingTx(date: string, direction: 'in' | 'out', amount: number): Party
     amount,
     note: 'Opening Balance',
     date,
+    time: '',
     createdAt: date,
     kind: 'opening',
   };
@@ -61,10 +62,11 @@ describe('computeStatementReport', () => {
       ]
     );
 
-    // All-time report: the Opening Balance entry is the first row of the period.
+    // All-time report: the opening entry is the first row of the period.
     expect(report.openingBalance).toBe(0);
     expect(report.entries.map((e) => e.date)).toEqual(['2026-07-31', '2026-08-01', '2026-08-02']);
-    expect(report.entries[0].description).toBe('Opening Balance');
+    // The opening entry carries the party action title, not a special label.
+    expect(report.entries[0].description).toBe('Money Out');
     // 500 (opening) → 500 + 1500 = 2000, then 2000 − 300 = 1700.
     expect(report.entries[0].debit).toBe(500);
     expect(report.entries[0].credit).toBe(0);
@@ -156,10 +158,26 @@ describe('computeStatementReport', () => {
     expect(report.netBalance).toBe(0);
   });
 
-  it('describes entries with their party action label', () => {
+  it('describes entries with their party action label when there is no note', () => {
     const report = computeStatementReport(CUSTOMER, [tx(1, '2026-08-01', 'out', 1500)]);
-    expect(report.entries[0].description).toBe('Give Money');
+    expect(report.entries[0].description).toBe('Money Out');
     const supplier = computeStatementReport(SUPPLIER, [tx(1, '2026-08-01', 'in', 500)]);
     expect(supplier.entries[0].description).toBe('Took on Credit');
+  });
+
+  it('uses the user note as the description when present', () => {
+    const report = computeStatementReport(CUSTOMER, [
+      tx(1, '2026-08-01', 'out', 1500, 'Wheat on credit'),
+    ]);
+    expect(report.entries[0].description).toBe('Wheat on credit');
+    expect(report.entries[0].note).toBe('Wheat on credit');
+  });
+
+  it('never surfaces the opening marker as a description or note', () => {
+    const report = computeStatementReport(CUSTOMER, [openingTx('2026-07-31', 'out', 500)]);
+    // The opening entry is described by its action; its system-marker note is
+    // stripped so the statement never prints "Opening Balance".
+    expect(report.entries[0].description).toBe('Money Out');
+    expect(report.entries[0].note).toBe('');
   });
 });

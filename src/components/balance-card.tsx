@@ -1,8 +1,9 @@
 /** Compact card showing a balance (used for Total, Cash, Bank). */
 import type { LucideIcon } from 'lucide-react-native';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/card';
+import { FitText } from '@/components/fit-text';
 import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -17,7 +18,9 @@ type BalanceCardProps = {
 
 export function BalanceCard({ label, amount, icon: Icon, accent }: BalanceCardProps) {
   const theme = useTheme();
-  const color = accent ?? theme.primary;
+  // Default color is sign-aware: a negative balance is an overdraft (expense
+  // red), not money in hand. Pass `accent` to force a fixed color.
+  const color = accent ?? (amount < 0 ? theme.expense : theme.primary);
 
   return (
     <Card style={styles.card}>
@@ -27,12 +30,9 @@ export function BalanceCard({ label, amount, icon: Icon, accent }: BalanceCardPr
       <ThemedText type="small" themeColor="textSecondary" style={styles.label}>
         {label}
       </ThemedText>
-      <Text
-        style={[styles.amount, { color }]}
-        numberOfLines={1}
-        ellipsizeMode="tail">
+      <FitText fontSize={22} style={[styles.amount, { color }]}>
         {formatINR(amount)}
-      </Text>
+      </FitText>
     </Card>
   );
 }
@@ -58,8 +58,6 @@ const styles = StyleSheet.create({
   },
   amount: {
     fontFamily: InterFonts.bold,
-    fontSize: 26,
-    flexShrink: 1,
-    minWidth: 0,
+    fontSize: 22,
   },
 });

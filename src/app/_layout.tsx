@@ -32,6 +32,7 @@ import { SyncProvider } from '@/context/sync-context';
 import { ThemeProvider, useAppTheme } from '@/context/theme-context';
 import { initDatabase } from '@/db/database';
 import { registerRecurringTask } from '@/services/recurring/scheduler';
+import { initNotifications } from '@/services/notifications';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -106,6 +107,9 @@ function DatabaseReadyGate({ children }: { children: ReactNode }) {
           hasRegisteredRecurring = true;
           void registerRecurringTask();
         }
+        // Local notifications: foreground handler, Android channel, sync-outcome
+        // subscription and the recurring reminder re-arm. No-ops on web.
+        void initNotifications();
       })
       .catch((err) => {
         if (!mounted) {
@@ -178,6 +182,8 @@ function NavigationStack() {
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="search" />
         <Stack.Screen name="cashbook" />
+        <Stack.Screen name="history-report" />
+        <Stack.Screen name="history-day/[date]" />
         <Stack.Screen name="categories" />
         <Stack.Screen name="export" />
         <Stack.Screen name="recurring" />

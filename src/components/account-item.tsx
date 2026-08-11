@@ -1,7 +1,8 @@
 /** A single account row (name, type, running balance). */
 import { Banknote, Landmark, Wallet, type LucideIcon } from 'lucide-react-native';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { AccountBalance, AccountType } from '@/types';
@@ -42,16 +43,17 @@ export function AccountItem({ item, onPress }: AccountItemProps) {
         <Icon size={22} color={theme.text} />
       </View>
       <View style={styles.middle}>
-        <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+        <ThemedText style={styles.name} numberOfLines={1}>
           {item.name}
-        </Text>
-        <Text style={[styles.sub, { color: theme.textSecondary }]} numberOfLines={1}>
+        </ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.sub} numberOfLines={1}>
           {ACCOUNT_LABELS[item.type]}
-        </Text>
+        </ThemedText>
       </View>
-      <Text style={[styles.amount, { color: item.balance < 0 ? theme.expense : theme.text }]}>
+      <ThemedText
+        style={[styles.amount, { color: item.balance < 0 ? theme.expense : theme.text }]}>
         {formatINR(item.balance)}
-      </Text>
+      </ThemedText>
     </Pressable>
   );
 }

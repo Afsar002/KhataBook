@@ -4,12 +4,12 @@ import { Screen } from '@/components/screen';
 import { TransactionForm } from '@/components/transaction-form';
 
 export default function IncomeScreen() {
-  const { editId } = useLocalSearchParams<{ editId?: string }>();
+  const { editId, date } = useLocalSearchParams<{ editId?: string; date?: string }>();
   const editingId = editId ? Number(editId) : undefined;
 
   return (
     <Screen>
-      <TransactionForm type="income" editingId={editingId} />
+      <TransactionForm type="income" editingId={editingId} defaultDate={date} />
     </Screen>
   );
 }

@@ -9,6 +9,7 @@ import { AmountInput } from '@/components/amount-input';
 import { Card } from '@/components/card';
 import { DatePicker } from '@/components/date-picker';
 import { LargeButton } from '@/components/large-button';
+import { ScreenHeader } from '@/components/screen-header';
 import { TextField } from '@/components/text-field';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
@@ -16,8 +17,9 @@ import { useAccounts } from '@/hooks/use-accounts';
 import { useTransfers } from '@/hooks/use-transfers';
 import { useTheme } from '@/hooks/use-theme';
 import { getTransfer } from '@/db/transfer-repo';
+import { accountWouldOverdraft } from '@/utils/account-balance';
 import { confirmDelete } from '@/utils/confirm';
-import { todayISODate } from '@/utils/format';
+import { formatINR, todayISODate } from '@/utils/format';
 
 type TransferFormProps = {
   /** When set, loads this transfer for editing instead of creating a new one. */
@@ -26,7 +28,7 @@ type TransferFormProps = {
 
 export function TransferForm({ editingId }: TransferFormProps) {
   const theme = useTheme();
-  const { accounts } = useAccounts();
+  const { accounts, balances } = useAccounts();
   const { add, remove, update } = useTransfers();
 
   const [fromId, setFromId] = useState<number | null>(null);
@@ -34,6 +36,11 @@ export function TransferForm({ editingId }: TransferFormProps) {
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
+  // Original transfer in edit mode — the source account's current balance
+  // already includes it, so the overdraft projection adds it back when the
+  // source is unchanged.
+  const [originalFromId, setOriginalFromId] = useState<number | null>(null);
+  const [originalAmount, setOriginalAmount] = useState<number | null>(null);
   // Date state - defaults to today for new entries, preserves original for edit
   const [date, setDate] = useState(todayISODate());
   const [loading, setLoading] = useState(Boolean(editingId));
@@ -55,6 +62,8 @@ export function TransferForm({ editingId }: TransferFormProps) {
         }
         setFromId(row.fromAccountId);
         setToId(row.toAccountId);
+        setOriginalFromId(row.fromAccountId);
+        setOriginalAmount(row.amount);
         setAmount(String(row.amount));
         setNote(row.note);
         setDate(row.date);
@@ -80,16 +89,28 @@ export function TransferForm({ editingId }: TransferFormProps) {
 
   const numeric = parseFloat(amount);
   const sameAccount = fromId !== null && fromId === toId;
+  // A transfer can never overdraft the source account — you can't move money
+  // you don't have. In edit mode the current balance already includes the old
+  // transfer, so add it back first when the source is unchanged.
+  const revert =
+    editingId && originalFromId === fromId && originalAmount !== null
+      ? { flow: 'out' as const, amount: originalAmount }
+      : null;
+  const overdraft =
+    fromId !== null && accountWouldOverdraft(balances, fromId, 'out', numeric, revert);
+  const sourceAccount = fromId !== null ? balances.find((b) => b.id === fromId) : undefined;
+  const available = (sourceAccount?.balance ?? 0) + (revert ? revert.amount : 0);
   const canSave =
     accounts.length >= 2 &&
     fromId !== null &&
     toId !== null &&
     !sameAccount &&
     numeric > 0 &&
+    !overdraft &&
     !saving;
 
-  const handleSave = async () => {
-    if (!canSave || fromId === null || toId === null) {
+  const save = async (amountToTransfer: number) => {
+    if (fromId === null || toId === null) {
       return;
     }
     setSaving(true);
@@ -97,7 +118,7 @@ export function TransferForm({ editingId }: TransferFormProps) {
       const input = {
         fromAccountId: fromId,
         toAccountId: toId,
-        amount: numeric,
+        amount: amountToTransfer,
         note: note.trim(),
         date,
       };
@@ -110,6 +131,15 @@ export function TransferForm({ editingId }: TransferFormProps) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = async () => {
+    // `canSave` already excludes overdraft transfers, so this is a defensive
+    // guard rather than the block itself.
+    if (!canSave || fromId === null || toId === null) {
+      return;
+    }
+    await save(numeric);
   };
 
   const handleDelete = async () => {
@@ -132,7 +162,7 @@ export function TransferForm({ editingId }: TransferFormProps) {
   if (accounts.length < 2) {
     return (
       <View style={styles.wrap}>
-        <ThemedText type="subtitle">{editingId ? 'Edit Transfer' : 'Transfer'}</ThemedText>
+        <ScreenHeader title={editingId ? 'Edit Transfer' : 'Transfer'} />
         <Card>
           <ThemedText>
             You need at least two accounts to move money between them. Add another account first.
@@ -148,7 +178,7 @@ export function TransferForm({ editingId }: TransferFormProps) {
 
   return (
     <View style={styles.wrap}>
-      <ThemedText type="subtitle">{editingId ? 'Edit Transfer' : 'Transfer'}</ThemedText>
+      <ScreenHeader title={editingId ? 'Edit Transfer' : 'Transfer'} />
 
       <Card>
         <ThemedText type="small" themeColor="textSecondary" style={styles.fieldLabel}>
@@ -177,6 +207,20 @@ export function TransferForm({ editingId }: TransferFormProps) {
         <AmountInput value={amount} onChangeText={setAmount} />
       </Card>
 
+      {overdraft && sourceAccount ? (
+        <ThemedText type="smallBold" themeColor="expense">
+          You can&apos;t transfer more than the {sourceAccount.name} balance ({formatINR(available)}).
+        </ThemedText>
+      ) : null}
+<Card>
+        <TextField
+          label="Note (optional)"
+          value={note}
+          onChangeText={setNote}
+          placeholder="e.g. Put into savings"
+          accessibilityLabel="Note"
+        />
+      </Card>
       <Card>
         <DatePicker
           label="Date"
@@ -187,15 +231,7 @@ export function TransferForm({ editingId }: TransferFormProps) {
         />
       </Card>
 
-      <Card>
-        <TextField
-          label="Note (optional)"
-          value={note}
-          onChangeText={setNote}
-          placeholder="e.g. Put into savings"
-          accessibilityLabel="Note"
-        />
-      </Card>
+      
 
       {editingId ? (
         <>

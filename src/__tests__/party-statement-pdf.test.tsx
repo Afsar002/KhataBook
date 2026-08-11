@@ -15,8 +15,6 @@ describe('buildPartyStatementPdf', () => {
     name: 'Ramesh Store',
     phone: '9876543210',
     type: 'customer' as const,
-    openingBalance: 500,
-    balance: 1700,
   };
 
   it('produces a valid PDF with ledger rows', async () => {
@@ -28,6 +26,7 @@ describe('buildPartyStatementPdf', () => {
         amount: 1500,
         note: 'Wheat on credit',
         date: '2026-08-01',
+        time: '10:30',
         createdAt: '2026-08-01',
         kind: 'normal',
       },
@@ -38,6 +37,7 @@ describe('buildPartyStatementPdf', () => {
         amount: 300,
         note: '',
         date: '2026-08-02',
+        time: '18:05',
         createdAt: '2026-08-02',
         kind: 'normal',
       },
@@ -60,8 +60,6 @@ describe('buildPartyStatementPdf', () => {
       name: 'Sharma Traders',
       phone: '',
       type: 'supplier',
-      openingBalance: 0,
-      balance: -2000,
       ledger: [
         {
           id: 1,
@@ -70,6 +68,7 @@ describe('buildPartyStatementPdf', () => {
           amount: 2000,
           note: 'Stock purchase',
           date: '2026-08-03',
+          time: '09:15',
           createdAt: '2026-08-03',
           kind: 'normal',
         },

@@ -77,6 +77,12 @@ function toLocalRow(
   if (spec.table === 'settings') {
     row.key = remote.key;
   }
+  // Cloud rows written before schema v12 have no `attachments` value, but the
+  // local column is NOT NULL — default it instead of binding a null (which
+  // would abort the whole pull with a constraint error).
+  if (spec.table === 'transactions' || spec.table === 'party_transactions') {
+    row.attachments = row.attachments ?? '[]';
+  }
   return row;
 }
 

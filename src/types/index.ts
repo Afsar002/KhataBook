@@ -28,6 +28,23 @@ export interface PartyBalance extends Party {
 
 export type LedgerEntryKind = 'normal' | 'opening';
 
+/**
+ * One attachment on an entry (image or PDF). The small metadata JSON is stored
+ * in the row's `attachments` column and synced; the file bytes live in the
+ * app's document directory (`attachments/<id>.<ext>`) and are device-local.
+ */
+export interface AttachmentMeta {
+  /** Unique id (uuid) — also the stored filename stem. */
+  id: string;
+  /** Original filename shown to the user. */
+  name: string;
+  /** e.g. `image/jpeg`, `application/pdf`. */
+  mimeType: string;
+  /** Size in bytes AFTER compression/copy. */
+  size: number;
+  kind: 'image' | 'pdf';
+}
+
 export interface PartyTransaction {
   id: number;
   partyId: number;
@@ -35,9 +52,15 @@ export interface PartyTransaction {
   amount: number;
   note: string;
   date: string;
+  /** `HH:MM` (24-hour local) recorded with the entry; '' for opening balance. */
+  time: string;
   createdAt: string;
   /** 'opening' for the immutable Opening Balance entry, 'normal' otherwise. */
   kind: LedgerEntryKind;
+  /** True when the entry has attachment(s) — shows the paperclip indicator. */
+  hasAttachments?: boolean;
+  /** Parsed attachment metadata (only loaded by the edit form). */
+  attachments?: AttachmentMeta[];
 }
 
 export interface NewPartyTransaction {
@@ -48,6 +71,10 @@ export interface NewPartyTransaction {
   date: string;
   /** Defaults to 'normal'. Set to 'opening' only via the dedicated workflow. */
   kind?: LedgerEntryKind;
+  /** `HH:MM` (24-hour local). Omitted → the current time is recorded. */
+  time?: string;
+  /** Attachment metadata to store (omitted → `[]`). */
+  attachments?: AttachmentMeta[];
 }
 
 export interface Account {
@@ -76,6 +103,8 @@ export interface Transaction {
   note: string;
   /** ISO date string `YYYY-MM-DD`. */
   date: string;
+  /** `HH:MM` (24-hour local) recorded with the entry; '' for opening balance. */
+  time: string;
   createdAt: string;
   /** 'opening' for the immutable Opening Balance entry, 'normal' otherwise. */
   kind: LedgerEntryKind;
@@ -87,6 +116,8 @@ export interface TransactionRow extends Transaction {
   accountType: AccountType;
   categoryName: string | null;
   categoryIcon: string | null;
+  /** Parsed attachment metadata (only loaded by the edit form). */
+  attachments?: AttachmentMeta[];
 }
 
 export interface NewTransaction {
@@ -98,6 +129,10 @@ export interface NewTransaction {
   date: string;
   /** Defaults to 'normal'. Set to 'opening' only via the dedicated workflow. */
   kind?: LedgerEntryKind;
+  /** `HH:MM` (24-hour local). Omitted → the current time is recorded. */
+  time?: string;
+  /** Attachment metadata to store (omitted → `[]`). */
+  attachments?: AttachmentMeta[];
 }
 
 export interface AccountBalance extends Account {
@@ -113,6 +148,8 @@ export interface Transfer {
   amount: number;
   note: string;
   date: string;
+  /** `HH:MM` (24-hour local) recorded with the entry; '' for opening balance. */
+  time: string;
   createdAt: string;
 }
 
@@ -122,6 +159,8 @@ export interface NewTransfer {
   amount: number;
   note: string;
   date: string;
+  /** `HH:MM` (24-hour local). Omitted → the current time is recorded. */
+  time?: string;
 }
 
 /** Transfer joined with both account names for list rendering. */
@@ -142,6 +181,8 @@ export interface LedgerRow {
   amount: number;
   note: string;
   date: string;
+  /** `HH:MM` (24-hour local) recorded with the entry; '' when unknown. */
+  time: string;
   createdAt: string;
   /** income/expense fields. */
   accountId: number | null;
@@ -156,6 +197,8 @@ export interface LedgerRow {
   toAccountName: string | null;
   /** 'opening' when this is an Opening Balance entry. */
   entryKind: LedgerEntryKind;
+  /** True when the entry has attachment(s) — shows the paperclip indicator. */
+  hasAttachments?: boolean;
 }
 
 export interface DaySummary {

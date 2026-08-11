@@ -1,4 +1,4 @@
-/** Pick a customer to give/receive money with (opened from the + button). */
+/** Pick a customer to record money in/out with (opened from the + button). */
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { HandCoins, Plus, Send, UserRound } from 'lucide-react-native';
 import { useCallback } from 'react';
@@ -29,7 +29,7 @@ export default function PartyPickScreen() {
   );
 
   const isGive = partyAction === 'give';
-  const title = isGive ? 'Give Money' : 'Receive Money';
+  const title = isGive ? 'Money Out' : 'Money In';
   const ActionIcon = isGive ? Send : HandCoins;
 
   const openEntry = (partyId: number) =>
@@ -51,7 +51,7 @@ export default function PartyPickScreen() {
         <EmptyState
           type="party"
           title="No customers yet"
-          message="Tap “Add Customer” to add your first customer, then give or receive money."
+          message="Tap “Add Customer” to add your first customer, then record money in or out."
         />
       ) : (
         <Card pad={false}>

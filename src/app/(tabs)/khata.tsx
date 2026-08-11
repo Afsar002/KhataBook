@@ -1,13 +1,17 @@
+/**
+ * Khata tab — customer/supplier ledger: headline summary card, a
+ * Customers/Suppliers toggle, and the party list with an add button.
+ */
 import { router, useFocusEffect } from 'expo-router';
 import { Plus } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Card } from '@/components/card';
 import { EmptyState } from '@/components/empty-state';
 import { KhataSummaryCard } from '@/components/khata-summary-card';
 import { PartyItem } from '@/components/party-item';
+import { Screen } from '@/components/screen';
 import { Segment } from '@/components/segment';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
@@ -37,16 +41,22 @@ export default function KhataScreen() {
     router.push({ pathname: '/party/[id]', params: { id: item.id } });
   }, []);
 
+  // The tab bar already owns the bottom safe-area inset, so the bottom edge is
+  // excluded here to avoid a blank gap above it.
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
-      <View style={[styles.container, { maxWidth: contentMaxWidth }]}>
+    <Screen scroll={false} hasTabBar>
+      <View style={[styles.column, { maxWidth: contentMaxWidth }]}>
         <View style={styles.header}>
           <ThemedText type="subtitle">Khata</ThemedText>
           <Pressable
             onPress={() => router.push({ pathname: '/party/new', params: { type } })}
             accessibilityRole="button"
             accessibilityLabel={addLabel}
-            style={[styles.addButton, { backgroundColor: theme.primary }]}>
+            style={({ pressed }) => [
+              styles.addButton,
+              { backgroundColor: theme.primary },
+              pressed && styles.pressed,
+            ]}>
             <Plus size={24} color="#FFFFFF" />
           </Pressable>
         </View>
@@ -67,13 +77,16 @@ export default function KhataScreen() {
           keyExtractor={(item) => String(item.id)}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
+          style={styles.list}
           initialNumToRender={12}
           maxToRenderPerBatch={12}
           windowSize={7}
-          ItemSeparatorComponent={() => (
-            <View style={[styles.separator, { backgroundColor: theme.border }]} />
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          renderItem={({ item }) => (
+            <Card pad={false} style={styles.rowCard}>
+              <PartyItem item={item} onPress={openParty} />
+            </Card>
           )}
-          renderItem={({ item }) => <PartyItem item={item} onPress={openParty} />}
           ListEmptyComponent={
             <Card>
               <EmptyState
@@ -85,20 +98,18 @@ export default function KhataScreen() {
           }
         />
       </View>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-  },
-  container: {
+  column: {
     flex: 1,
     width: '100%',
     alignSelf: 'center',
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.three,
+    gap: Spacing.three,
   },
   header: {
     flexDirection: 'row',
@@ -112,12 +123,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  pressed: {
+    opacity: 0.85,
+  },
+  list: {
+    flex: 1,
+  },
   listContent: {
     paddingTop: Spacing.two,
-    paddingBottom: Spacing.seven,
+    paddingBottom: 0,
+  },
+  rowCard: {
+    paddingHorizontal: Spacing.three,
   },
   separator: {
-    height: 1,
-    marginVertical: Spacing.one,
+    height: Spacing.two,
   },
 });

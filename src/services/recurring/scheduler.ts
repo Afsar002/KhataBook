@@ -27,9 +27,11 @@ interface GeneratedEntry {
 
 /**
  * Check if a template should generate an entry for the given date.
- * This is a secondary check in addition to the SQL query.
+ * This is a secondary check in addition to the SQL query. Exported so the
+ * reminder scheduler can reuse the same frequency/range rules to find a
+ * template's next due date.
  */
-function shouldGenerateForDate(template: RecurringTemplate, date: string): boolean {
+export function shouldGenerateForDate(template: RecurringTemplate, date: string): boolean {
   const templateDate = new Date(template.startDate + 'T00:00:00');
   const targetDate = new Date(date + 'T00:00:00');
 

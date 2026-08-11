@@ -1,12 +1,12 @@
 /** A single khata ledger entry. */
 import { memo } from 'react';
-import { TrendingDown, TrendingUp } from 'lucide-react-native';
+import { Paperclip, TrendingDown, TrendingUp } from 'lucide-react-native';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { InterFonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { PartyTransaction } from '@/types';
-import { formatINR } from '@/utils/format';
+import { formatINR, formatISOToDisplay, formatTimeOfDay } from '@/utils/format';
 import { impact } from '@/utils/haptics';
 
 type PartyTransactionItemProps = {
@@ -57,10 +57,25 @@ function PartyTransactionItemRow({
           </Text>
         ) : null}
       </View>
-      <Text style={[styles.amount, { color }]}>
-        {increases ? '+' : '-'}
-        {formatINR(item.amount)}
-      </Text>
+      <View style={styles.amountWrap}>
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+          style={[styles.amount, { color }]}>
+          {increases ? '+' : '-'}
+          {formatINR(item.amount)}
+        </Text>
+        <View style={styles.dateWrap}>
+          <Text style={[styles.date, { color: theme.textSecondary }]} numberOfLines={1}>
+            {formatISOToDisplay(item.date)}
+            {item.time ? ` · ${formatTimeOfDay(item.time)}` : ''}
+          </Text>
+          {item.hasAttachments ? (
+            <Paperclip size={11} color={theme.textSecondary} />
+          ) : null}
+        </View>
+      </View>
     </Pressable>
   );
 }
@@ -97,6 +112,21 @@ const styles = StyleSheet.create({
   amount: {
     fontFamily: InterFonts.semibold,
     fontSize: 15,
+  },
+  amountWrap: {
+    alignItems: 'flex-end',
+    flexShrink: 1,
+  },
+  date: {
+    fontFamily: InterFonts.regular,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  dateWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    justifyContent: 'flex-end',
   },
 });
 

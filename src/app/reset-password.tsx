@@ -168,7 +168,7 @@ export default function ResetPasswordScreen() {
             onChangeText={setConfirm}
             accessibilityLabel="Confirm password"
           />
-          {error ? <ThemedText type="small" style={styles.error}>{error}</ThemedText> : null}
+          {error ? <ThemedText type="small" themeColor="danger">{error}</ThemedText> : null}
           <LargeButton title="Update password" onPress={submit} disabled={busy} />
           {busy ? <ActivityIndicator size="small" color={theme.primary} /> : null}
           <Pressable
@@ -203,9 +203,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
-  },
-  error: {
-    color: '#EF4444',
   },
   backRow: {
     alignItems: 'center',

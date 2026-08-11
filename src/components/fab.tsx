@@ -10,8 +10,9 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
+import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { impact } from '@/utils/haptics';
@@ -33,7 +34,7 @@ export function Fab() {
   const actions: FabAction[] = [
     {
       key: 'income',
-      label: 'Add Income',
+      label: 'Deposit',
       icon: TrendingUp,
       color: theme.income,
       onPress: () => {
@@ -44,7 +45,7 @@ export function Fab() {
     },
     {
       key: 'expense',
-      label: 'Add Expense',
+      label: 'Withdraw',
       icon: TrendingDown,
       color: theme.expense,
       onPress: () => {
@@ -55,7 +56,7 @@ export function Fab() {
     },
     {
       key: 'give',
-      label: 'Give Money',
+      label: 'Money Out',
       icon: Send,
       color: theme.text,
       onPress: () => {
@@ -66,7 +67,7 @@ export function Fab() {
     },
     {
       key: 'receive',
-      label: 'Receive Money',
+      label: 'Money In',
       icon: HandCoins,
       color: theme.text,
       onPress: () => {
@@ -113,7 +114,7 @@ export function Fab() {
                 <View style={[styles.actionIcon, { backgroundColor: theme.backgroundElement }]}>
                   <Icon size={22} color={action.color} />
                 </View>
-                <Text style={[styles.actionLabel, { color: theme.text }]}>{action.label}</Text>
+                <ThemedText style={styles.actionLabel}>{action.label}</ThemedText>
               </Pressable>
             );
           })}
