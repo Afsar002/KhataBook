@@ -1,5 +1,5 @@
 import { Slot, Tabs } from 'expo-router';
-import { BarChart3, BookOpen, History, Home, Settings } from 'lucide-react-native';
+import { BarChart3, BookOpen, Home, NotebookPen, Settings } from 'lucide-react-native';
 import { StyleSheet, View } from 'react-native';
 
 import { Sidebar, type SidebarItem } from '@/components/sidebar';
@@ -10,7 +10,7 @@ import { useTheme } from '@/hooks/use-theme';
 /** Route → tab title/icon, kept in one place so renames are a one-liner. */
 const TAB_META: SidebarItem[] = [
   { name: 'index', title: 'Home', Icon: Home },
-  { name: 'history', title: 'Cashbook', Icon: History },
+  { name: 'history', title: 'Cashbook', Icon: NotebookPen },
   { name: 'khata', title: 'Khata', Icon: BookOpen },
   { name: 'reports', title: 'Reports', Icon: BarChart3 },
   { name: 'settings', title: 'Settings', Icon: Settings },
@@ -35,6 +35,7 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      initialRouteName="history"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: theme.primary,
