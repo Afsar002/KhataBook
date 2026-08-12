@@ -101,25 +101,48 @@ export default function PartyDetailScreen() {
     return Array.from(byDate.values());
   }, [ledger]);
 
-  /** Running balance per entry (newest-first order). */
+  /** Running balance per entry (newest-first order, matching ledger order). */
   const runningBalances = useMemo<number[]>(() => {
-    let running = balance; // start from current total balance
-    // We need to subtract entries in reverse (oldest to newest) to get running balance
-    // Since ledger is newest-first, we iterate backwards
+    // Find opening balance and regular entries
+    const openingEntry = ledger.find((e) => e.kind === 'opening');
+    const openingBalance = openingEntry?.amount ?? 0;
+    const regularEntries = ledger.filter((e) => e.kind !== 'opening');
+
+    // Sort regular entries oldest-first for forward calculation
+    const sortedEntries = [...regularEntries].sort((a, b) => {
+      const dateDiff = a.date.localeCompare(b.date);
+      if (dateDiff !== 0) return dateDiff;
+      return a.id - b.id;
+    });
+
+    // Calculate running balance forward from opening balance
     const balances: number[] = [];
-    for (let i = ledger.length - 1; i >= 0; i--) {
-      const entry = ledger[i];
-      if (entry.kind === 'opening') {
-        running = entry.amount; // opening balance sets the baseline
-      } else {
-        // For both customers and suppliers: 'in' increases the balance, 'out' decreases
-        const signed = entry.direction === 'in' ? entry.amount : -entry.amount;
-        running += signed;
-      }
-      balances.unshift(running);
+    let running = openingBalance;
+    for (const entry of sortedEntries) {
+      // Customer: 'out' (give) increases balance, 'in' (receive) decreases
+      // Supplier: 'in' (take) increases balance, 'out' (pay) decreases
+      const increasesBalance =
+        (partyType === 'customer' && entry.direction === 'out') ||
+        (partyType === 'supplier' && entry.direction === 'in');
+      running += increasesBalance ? entry.amount : -entry.amount;
+      balances.push(running);
     }
-    return balances;
-  }, [ledger, balance]);
+
+    // Now map back to original ledger order (newest-first)
+    // Create a map from entry id to running balance
+    const balanceMap = new Map<number, number>();
+    sortedEntries.forEach((entry, index) => {
+      balanceMap.set(entry.id, balances[index]);
+    });
+
+    // Return balances in ledger order (newest-first), with opening balance first
+    return ledger.map((entry) => {
+      if (entry.kind === 'opening') {
+        return openingBalance;
+      }
+      return balanceMap.get(entry.id) ?? 0;
+    });
+  }, [ledger, partyType]);
 
   /** Assign running balances to each group's entries. */
   const groupsWithBalances = useMemo<DayGroup[]>(() => {

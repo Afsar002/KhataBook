@@ -93,26 +93,25 @@ export function CalculatorKeypad({ onKeyPress, disabled = false }: CalculatorKey
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     gap: Spacing.two,
     paddingHorizontal: Spacing.two,
     paddingTop: Spacing.two,
-    paddingBottom: Spacing.three,
+    paddingBottom: Spacing.two,
   },
   row: {
+    flex: 1,
     flexDirection: 'row',
     gap: Spacing.two,
   },
   key: {
     flex: 1,
-    aspectRatio: 1,
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 60,
   },
   keyZero: {
     flex: 2,
-    aspectRatio: 2,
   },
   keyContent: {
     flex: 1,

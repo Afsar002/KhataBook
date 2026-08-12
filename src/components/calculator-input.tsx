@@ -4,16 +4,20 @@
  * Shows expression + live evaluated result + blinking cursor.
  * Integrates with CalculatorKeypad via onKeyPress.
  * Passes computed value to parent via onChangeAmount.
+ * Keypad appears as a full-width bottom sheet covering 40% of the screen
+ * height (like a native keyboard). It shows when the amount input is tapped
+ * and dismisses when "=" is pressed or the user taps outside the keypad.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Dimensions, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CalculatorKeypad } from '@/components/calculator-keypad';
 import { Card } from '@/components/card';
 import { ThemedText } from '@/components/themed-text';
-import { InterFonts, Spacing } from '@/constants/theme';
+import { AnimationDuration, InterFonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { evaluateExpression, formatResult } from '@/utils/calculator';
-import { CalculatorKeypad } from '@/components/calculator-keypad';
 
 type CalculatorInputProps = {
   /** Initial expression string */
@@ -28,9 +32,11 @@ type CalculatorInputProps = {
   accessibilityLabel?: string;
   /** Disabled state */
   disabled?: boolean;
-  /** Show the keypad (default: true) */
-  showKeypad?: boolean;
 };
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+/** Keypad covers 40% of the screen height. */
+const KEYPAD_HEIGHT_RATIO = 0.4;
 
 export function CalculatorInput({
   initialValue = '',
@@ -39,12 +45,17 @@ export function CalculatorInput({
   placeholder = 'Enter amount',
   accessibilityLabel = 'Calculator amount input',
   disabled = false,
-  showKeypad = true,
 }: CalculatorInputProps) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const [expression, setExpression] = useState(initialValue);
   const [showCursor, setShowCursor] = useState(true);
+  const [isFocused, setIsFocused] = useState(false);
   const cursorTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [keypadAnim] = useState(() => new Animated.Value(SCREEN_HEIGHT));
+  const keypadVisibleRef = useRef(false);
+
+  const keypadHeight = Math.round(SCREEN_HEIGHT * KEYPAD_HEIGHT_RATIO);
 
   // Blinking cursor
   useEffect(() => {
@@ -55,6 +66,41 @@ export function CalculatorInput({
       if (cursorTimerRef.current) clearInterval(cursorTimerRef.current);
     };
   }, []);
+
+  // Animate keypad in/out
+  const showKeypad = () => {
+    if (keypadVisibleRef.current) return;
+    keypadVisibleRef.current = true;
+    setIsFocused(true);
+    Animated.timing(keypadAnim, {
+      toValue: 0,
+      duration: AnimationDuration,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const hideKeypad = () => {
+    if (!keypadVisibleRef.current) return;
+    keypadVisibleRef.current = false;
+    Animated.timing(keypadAnim, {
+      toValue: SCREEN_HEIGHT,
+      duration: AnimationDuration,
+      useNativeDriver: true,
+    }).start(() => {
+      setIsFocused(false);
+    });
+  };
+
+  const handleFocus = () => {
+    if (!disabled) {
+      setShowCursor(true);
+      if (cursorTimerRef.current) clearInterval(cursorTimerRef.current);
+      cursorTimerRef.current = setInterval(() => {
+        setShowCursor((prev) => !prev);
+      }, 530);
+      showKeypad();
+    }
+  };
 
   // Live evaluation
   const liveResult = evaluateExpression(expression);
@@ -80,7 +126,8 @@ export function CalculatorInput({
           setExpression(formatted);
           onChangeAmount?.(liveResult);
         }
-        break;
+        hideKeypad();
+        return;
       default:
         // Numbers, operators, decimal
         if (disabled) return;
@@ -110,16 +157,6 @@ export function CalculatorInput({
 
     setExpression(newExpression);
     onKeyPress?.(key);
-  };
-
-  const handleFocus = () => {
-    if (!disabled) {
-      setShowCursor(true);
-      if (cursorTimerRef.current) clearInterval(cursorTimerRef.current);
-      cursorTimerRef.current = setInterval(() => {
-        setShowCursor((prev) => !prev);
-      }, 530);
-    }
   };
 
   const displayExpression = expression || placeholder;
@@ -173,16 +210,47 @@ export function CalculatorInput({
         </Pressable>
       </Card>
 
-      {showKeypad && (
-        <CalculatorKeypad onKeyPress={handleKeyPress} disabled={disabled} />
-      )}
+      {/* Full-width keypad modal — covers 40% of the screen height, dismisses
+          on "=" or when tapping outside the keypad. */}
+      <Modal
+        visible={isFocused}
+        transparent
+        statusBarTranslucent
+        animationType="none"
+        onRequestClose={hideKeypad}
+      >
+        <View style={styles.modalRoot}>
+          {/* Backdrop — tap outside the keypad to dismiss */}
+          <Pressable
+            style={styles.backdrop}
+            onPress={hideKeypad}
+            accessibilityLabel="Close keypad"
+            hitSlop={{ top: 0, left: 0, right: 0, bottom: 0 }}
+          />
+          {/* Keypad sheet — full width, 40% of screen height */}
+          <Animated.View
+            style={[
+              styles.keypadSheet,
+              {
+                height: keypadHeight,
+                backgroundColor: theme.background,
+                transform: [{ translateY: keypadAnim }],
+              },
+            ]}
+          >
+            <View style={[styles.keypadHandle, { backgroundColor: theme.border }]} />
+            <CalculatorKeypad onKeyPress={handleKeyPress} disabled={disabled} />
+            <View style={{ height: insets.bottom }} />
+          </Animated.View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
-    gap: Spacing.three,
+    flex: 1,
     width: '100%',
   },
   inputCard: {
@@ -218,5 +286,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     fontFamily: InterFonts.medium,
+  },
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'transparent', // Important: allows touch to pass through to keypad
+  },
+  keypadSheet: {
+    width: '100%',
+    borderTopLeftRadius: Radius.button,
+    borderTopRightRadius: Radius.button,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 10,
+    overflow: 'hidden',
+  },
+  keypadHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: Radius.chip,
+    marginTop: Spacing.two,
+    marginBottom: Spacing.one,
   },
 });
