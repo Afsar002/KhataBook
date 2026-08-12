@@ -32,7 +32,7 @@ import { SyncProvider } from '@/context/sync-context';
 import { ThemeProvider, useAppTheme } from '@/context/theme-context';
 import { initDatabase } from '@/db/database';
 import { registerRecurringTask } from '@/services/recurring/scheduler';
-import { initNotifications } from '@/services/notifications';
+import { initNotifications, UpdateWatcher } from '@/services/notifications';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -264,6 +264,7 @@ export default function RootLayout() {
       <DatabaseReadyGate>
         <ThemeProvider>
           <FeedbackProvider>
+            <UpdateWatcher />
             <ProfileProvider>
               <AuthProvider>
                 <SyncProvider>

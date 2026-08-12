@@ -1,3 +1,28 @@
+OTA update-downloaded notification (2026-08-12)
+
+When an over-the-air update finishes downloading, the app now says so — an
+in-app success toast while it's on screen ("New update downloaded — restart to
+apply it.", same tone as the PDF-export feedback) or a local notification when
+backgrounded (like the sync-outcome alerts). A tiny `<UpdateWatcher />` mounted
+at the root uses expo-updates' `useUpdates()` hook and fires exactly once per
+fresh download (`isUpdatePending` false→true), so an update that has been
+waiting since an earlier launch is never re-announced on every cold start.
+Tapping the notification just opens the app (no deep-link target exists for an
+update). 8 new tests; full suite 43 suites / 411 tests green.
+
+PDF row overlap fix (2026-08-12)
+
+Rows in the transactions report (and statement rows with wrapping notes) were
+occasionally overlapping because the zebra-stripe rectangles were anchored at
+the row's top baseline and painted **upward** (pdf-lib anchors rectangles at
+the bottom-left), so a tall row's stripe reached into the row above while
+leaving its own deep wrapped text uncovered. The stripe is now sized to the
+row's actual text extent (deepest descender → top ascender); the single-line
+totals/grand-total stripes shrank so they can't reach into a wrapped row.
+Row-height advancement itself was already correct. Verified: `pdf-layout`,
+`statement`, `party-statement-pdf` suites pass; full suite 42 suites / 403
+tests green.
+
 Camera capture + Cashbook PDF columns (2026-08-12)
 
 Two follow-ups to the attachments + transactions report work.

@@ -30,6 +30,7 @@ export {
   setSyncUpdatesEnabled,
 } from './prefs';
 export { initSyncNotifications } from './sync';
+export { notifyUpdateDownloaded, UpdateWatcher } from './update';
 
 /**
  * Boot-time setup: foreground notification behaviour, Android channel, event

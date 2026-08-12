@@ -197,6 +197,27 @@
 - ✓ PDF regression verified (pdf-layout / statement / party-statement suites);
     full suite 403 green, tsc 0 errors, eslint 0 problems
 
+## Completed (PDF row overlap fix 2026-08-12)
+
+- ✓ Transactions-report rows were overlapping when a Notes/Category cell wrapped
+    to two lines: the zebra stripes were anchored at the row's top baseline and
+    pdf-lib paints rectangles upward, so a tall stripe reached into the row above
+    while missing its own deep text. Stripes are now text-anchored (deepest
+    descender → top ascender); single-line totals/grand-total stripes shrank
+    accordingly. The row-height cursor advance was already correct
+- ✓ Verified: `pdf-layout` / `statement` / `party-statement-pdf` suites pass;
+    full suite 42 suites / 403 tests green
+
+## Completed (OTA update-downloaded notification 2026-08-12)
+
+- ✓ When an over-the-air update finishes downloading, the user is told — in-app
+    success toast while foregrounded (like the PDF-export feedback) or a local
+    notification when backgrounded (like sync-outcome alerts)
+- ✓ `UpdateWatcher` (`src/services/notifications/update.tsx`) rides expo-updates'
+    `useUpdates()` hook and fires once per fresh download (`isUpdatePending`
+    false→true); an update already pending at mount is never re-announced
+- ✓ 8 new tests; full suite 43 suites / 411 tests green
+
 ## Removed
 
 - Local Unlock Protection (v1.11) was never wired in — removed in the
