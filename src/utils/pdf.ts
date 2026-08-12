@@ -472,7 +472,18 @@ function drawStatementRow(r: Renderer, cols: Column[], include: StatementInclude
   r.ensure(rowH + 4);
 
   const y = r.y;
-  if (zebra) r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: rowH, color: LIGHT });
+  // Stripe sized to the text extent (deepest wrapped line's descender .. top
+  // ascender) so adjacent rows never overlap, even when one row wraps to a
+  // second line and its neighbour does not.
+  if (zebra) {
+    r.page.drawRectangle({
+      x: MARGIN,
+      y: y - extra * 11 - 2,
+      width: CONTENT_W,
+      height: extra * 11 + 10,
+      color: LIGHT,
+    });
+  }
   for (const col of cols) {
     if (col.key === 'date') {
       r.draw(formatISOToDisplay(entry.date), col.x, y, 9.5, r.regular, DARK);
@@ -497,7 +508,9 @@ function drawGrandTotal(r: Renderer, cols: Column[], report: StatementReport): v
   r.ensure(26);
   const y = r.y;
   r.page.drawRectangle({ x: MARGIN, y: y + 4, width: CONTENT_W, height: 1.6, color: BRAND });
-  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 18, color: LIGHT });
+  // Single-line stripe kept short so it never reaches up into the last
+  // statement row's deep wrapped text.
+  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 10, color: LIGHT });
   r.draw('Grand Total', MARGIN + 8, y, 10.5, r.bold, DARK);
   const netColor = report.netBalance >= 0 ? BRAND : RED;
   for (const col of cols) {
@@ -702,11 +715,33 @@ function drawTransactionRow(r: Renderer, cols: Column[], entry: LedgerRow, runni
   const noteH = noteLines.length * 10;
   const catGap = noteLines.length > 0 && catLines.length > 0 ? 2 : 0;
   const catH = catLines.length * 9;
-  const rowH = Math.max(16, noteH + catGap + catH + 2);
+
+  // Row height = the wrapped content's baseline extent plus padding below the
+  // deepest descender, so the next row's text can never clip this row's.
+  const rowH = Math.max(16, noteH + catGap + catH + 4);
 
   r.ensure(rowH + 4);
   const y = r.y;
-  if (zebra) r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: rowH, color: LIGHT });
+
+  // Zebra stripe is sized to the *text* — from the deepest baseline's descender
+  // up to the top baseline's ascender — not to the whole row box. pdf-lib's
+  // drawRectangle anchors y at the bottom-left and paints upward, so anchoring
+  // at the row's top baseline (`y: y - 2, height: rowH`) makes a tall row's
+  // stripe extend up into the row above (clipping its wrapped text) while
+  // leaving its own deepest line uncovered. Text-anchored stripes do neither.
+  const DESC_PAD = 2; // room below the deepest baseline (descenders)
+  const ASC_PAD = 8; // room above the top baseline (ascenders)
+  const deepest =
+    catLines.length > 0 ? noteH + catGap + (catLines.length - 1) * 9 : Math.max(0, noteH - 10);
+  if (zebra) {
+    r.page.drawRectangle({
+      x: MARGIN,
+      y: y - deepest - DESC_PAD,
+      width: CONTENT_W,
+      height: deepest + DESC_PAD + ASC_PAD,
+      color: LIGHT,
+    });
+  }
 
   // Date
   r.draw(formatISOToDisplay(entry.date), cols[0].x, y, 9.5, r.regular, DARK);
@@ -737,7 +772,9 @@ function drawTransactionTotals(r: Renderer, cols: Column[], totalIncome: number,
   r.ensure(26);
   const y = r.y;
   r.page.drawRectangle({ x: MARGIN, y: y + 2, width: CONTENT_W, height: 0.8, color: BORDER });
-  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 16, color: LIGHT });
+  // Single-line stripe kept short so it never reaches up into the last data
+  // row's deep wrapped text (see drawTransactionRow's text-anchored note).
+  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 10, color: LIGHT });
 
   r.draw('Totals', MARGIN + 8, y, 9.5, r.bold, DARK);
   const depositCol = cols.find((c) => c.key === 'deposit') ?? cols[2];
