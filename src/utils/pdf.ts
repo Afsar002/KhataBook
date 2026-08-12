@@ -477,28 +477,6 @@ function drawStatementRow(r: Renderer, cols: Column[], include: StatementInclude
   r.y = y - rowH;
 }
 
-function drawMonthTotals(
-  r: Renderer,
-  cols: Column[],
-  label: string,
-  debit: number,
-  credit: number,
-  running?: number
-): void {
-  r.ensure(24);
-  const y = r.y;
-  r.page.drawRectangle({ x: MARGIN, y: y + 2, width: CONTENT_W, height: 0.8, color: BORDER });
-  r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 16, color: LIGHT });
-  r.draw(label, MARGIN + 8, y, 9.5, r.bold, DARK);
-  for (const col of cols) {
-    if (col.key === 'debit') r.drawRight(r.money(debit, r.bold), col.x + col.width, y, 9.5, r.bold, DARK);
-    else if (col.key === 'credit') r.drawRight(r.money(credit, r.bold), col.x + col.width, y, 9.5, r.bold, DARK);
-    else if (col.key === 'running' && running !== undefined)
-      r.drawRight(r.money(running, r.bold), col.x + col.width, y, 9.5, r.bold, DARK);
-  }
-  r.y = y - 18;
-}
-
 function drawGrandTotal(r: Renderer, cols: Column[], report: StatementReport): void {
   r.ensure(26);
   const y = r.y;
@@ -564,12 +542,10 @@ function renderStatement(r: Renderer, report: StatementReport, include: Statemen
       // If ensure() broke onto a fresh page, onPageBreak already drew the table
       // header and this month's header — drawing it again stacks a duplicate.
       if (r.page === pageBefore) drawMonthHeader(r, month.label);
-      const last = month.entries[month.entries.length - 1];
       for (const entry of month.entries) {
         drawStatementRow(r, cols, include, entry, zebra);
         zebra = !zebra;
       }
-      drawMonthTotals(r, cols, `Month Total — ${month.label}`, month.debit, month.credit, include.runningBalance ? last.runningBalance : undefined);
       r.y -= 6;
     }
   }
@@ -922,12 +898,10 @@ async function renderPartyStatement(r: Renderer, party: PartyBalance): Promise<v
       const pageBefore = r.page;
       r.ensure(30);
       if (r.page === pageBefore) drawMonthHeader(r, month.label);
-      const last = month.entries[month.entries.length - 1];
       for (const entry of month.entries) {
         drawStatementRow(r, cols, include, entry, zebra);
         zebra = !zebra;
       }
-      drawMonthTotals(r, cols, `Month Total — ${month.label}`, month.debit, month.credit, last.runningBalance);
       r.y -= 6;
     }
   }
