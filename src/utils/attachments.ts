@@ -1,5 +1,5 @@
 /**
- * Attachment pick / compress / copy / view helpers.
+ * Attachment pick / copy / view helpers.
  *
  * Every function here is crash-safe by construction: picker results are
  * validated, files are size-capped, copies are verified, and malformed stored
@@ -11,7 +11,6 @@
  */
 import * as DocumentPicker from 'expo-document-picker';
 import { Directory, File, Paths } from 'expo-file-system';
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 
@@ -20,14 +19,10 @@ import { uuid } from '@/utils/uuid';
 
 /** Max attachments per entry. */
 export const MAX_ATTACHMENTS = 5;
-/** Images are rejected above this size (before compression). */
+/** Images are rejected above this size. */
 export const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 /** PDFs are rejected above this size. */
 export const MAX_PDF_BYTES = 25 * 1024 * 1024;
-/** Longest image edge after compression (pixels). */
-const MAX_IMAGE_DIMENSION = 1600;
-/** JPEG compression quality applied to every picked image. */
-const IMAGE_QUALITY = 0.7;
 
 const ATTACHMENTS_DIR_NAME = 'attachments';
 
@@ -141,6 +136,7 @@ interface PickedImage {
   width?: number | null;
   height?: number | null;
   fileName?: string | null;
+  mimeType?: string | null;
 }
 
 /**
@@ -160,8 +156,9 @@ export async function pickAttachment(kind: AttachmentPickKind): Promise<Attachme
 }
 
 /**
- * Shared image pipeline for gallery + camera picks: size cap → optional resize
- * → JPEG re-encode → verified copy into the attachments dir.
+ * Shared image pipeline for gallery + camera picks:
+ * size cap → use expo-image-picker's built-in quality (0.7) to compress → verified copy.
+ * We use the picker's `quality` option instead of expo-image-manipulator to avoid extra dependency.
  */
 async function compressAndStoreImage(
   asset: PickedImage | undefined | null,
@@ -174,29 +171,10 @@ async function compressAndStoreImage(
     throw new Error(`Image is larger than ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB. Pick a smaller one.`);
   }
 
-  // Resize only when an edge exceeds the cap (never upscale), keeping aspect.
-  const actions: ImageManipulator.Action[] = [];
-  const width = asset.width ?? 0;
-  const height = asset.height ?? 0;
-  if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
-    if (width >= height) {
-      actions.push({ resize: { width: MAX_IMAGE_DIMENSION } });
-    } else {
-      actions.push({ resize: { height: MAX_IMAGE_DIMENSION } });
-    }
-  }
-
-  // Re-encode to JPEG even when no resize is needed — this is what guarantees
-  // compression for PNG/BMP sources (the picker's `quality` is ignored there).
-  const manipulated = await ImageManipulator.manipulateAsync(asset.uri, actions, {
-    compress: IMAGE_QUALITY,
-    format: ImageManipulator.SaveFormat.JPEG,
-  });
-
   const meta: AttachmentMeta = {
     id: uuid(),
     name: asset.fileName?.trim() || fallbackName,
-    mimeType: 'image/jpeg',
+    mimeType: asset.mimeType || 'image/jpeg',
     size: 0,
     kind: 'image',
   };
@@ -204,7 +182,7 @@ async function compressAndStoreImage(
   if (!filename) {
     throw new Error('Could not store the attachment.');
   }
-  meta.size = await copyIntoAttachments(manipulated.uri, filename);
+  meta.size = await copyIntoAttachments(asset.uri, filename);
   return meta;
 }
 
@@ -212,6 +190,7 @@ async function pickImage(): Promise<AttachmentMeta | null> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: 'images',
     allowsMultipleSelection: false,
+    quality: 0.7,
   });
   if (result.canceled) {
     return null;
@@ -228,6 +207,7 @@ async function pickCamera(): Promise<AttachmentMeta | null> {
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes: 'images',
     allowsMultipleSelection: false,
+    quality: 0.7,
   });
   if (result.canceled) {
     return null;

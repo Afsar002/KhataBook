@@ -4,7 +4,7 @@ import { Trash2 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { AmountInput } from '@/components/amount-input';
+import { CalculatorInput } from '@/components/calculator-input';
 import { Card } from '@/components/card';
 import { DatePicker } from '@/components/date-picker';
 import { LargeButton } from '@/components/large-button';
@@ -156,7 +156,11 @@ export function PartyEntryForm({
         <ThemedText type="smallBold" themeColor="textSecondary">
           Amount
         </ThemedText>
-        <AmountInput value={amount} onChangeText={setAmount} />
+        <CalculatorInput
+          onChangeAmount={(value) => setAmount(String(value))}
+          placeholder="Enter amount"
+          accessibilityLabel="Entry amount"
+        />
       </Card>
 
       <Card style={styles.card}>

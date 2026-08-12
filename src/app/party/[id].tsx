@@ -48,6 +48,7 @@ type DayGroup = {
   give: number;
   receive: number;
   entries: PartyTransaction[];
+  runningBalances: number[];
 };
 
 export default function PartyDetailScreen() {
@@ -87,7 +88,7 @@ export default function PartyDetailScreen() {
     for (const entry of ledger) {
       let group = byDate.get(entry.date);
       if (!group) {
-        group = { date: entry.date, give: 0, receive: 0, entries: [] };
+        group = { date: entry.date, give: 0, receive: 0, entries: [], runningBalances: [] };
         byDate.set(entry.date, group);
       }
       group.entries.push(entry);
@@ -99,6 +100,37 @@ export default function PartyDetailScreen() {
     }
     return Array.from(byDate.values());
   }, [ledger]);
+
+  /** Running balance per entry (newest-first order). */
+  const runningBalances = useMemo<number[]>(() => {
+    let running = balance; // start from current total balance
+    // We need to subtract entries in reverse (oldest to newest) to get running balance
+    // Since ledger is newest-first, we iterate backwards
+    const balances: number[] = [];
+    for (let i = ledger.length - 1; i >= 0; i--) {
+      const entry = ledger[i];
+      if (entry.kind === 'opening') {
+        running = entry.amount; // opening balance sets the baseline
+      } else {
+        // For both customers and suppliers: 'in' increases the balance, 'out' decreases
+        const signed = entry.direction === 'in' ? entry.amount : -entry.amount;
+        running += signed;
+      }
+      balances.unshift(running);
+    }
+    return balances;
+  }, [ledger, balance]);
+
+  /** Assign running balances to each group's entries. */
+  const groupsWithBalances = useMemo<DayGroup[]>(() => {
+    let balanceIndex = 0;
+    return groups.map((group) => {
+      const entryCount = group.entries.length;
+      const groupBalances = runningBalances.slice(balanceIndex, balanceIndex + entryCount);
+      balanceIndex += entryCount;
+      return { ...group, runningBalances: groupBalances };
+    });
+  }, [groups, runningBalances]);
 
   if (!party) {
     return null;
@@ -277,9 +309,10 @@ export default function PartyDetailScreen() {
 
         {/* Grouped ledger — daily headers above 3-column entry cards. */}
         <SectionList
-          sections={groups.map((group) => ({
+          sections={groupsWithBalances.map((group) => ({
             date: group.date,
             data: group.entries,
+            runningBalances: group.runningBalances,
           }))}
           keyExtractor={(item) => String(item.id)}
           stickySectionHeadersEnabled={false}
@@ -291,14 +324,19 @@ export default function PartyDetailScreen() {
           renderSectionHeader={({ section }) => (
             <DayHeaderRow date={section.date} />
           )}
-          renderItem={({ item }) => {
+          renderItem={({ item, section }) => {
             const isOpening = item.kind === 'opening';
+            // Find the index of this item within the section to get its running balance
+            const itemIndex = section.data.findIndex((e) => e.id === item.id);
+            const runningBalance = itemIndex >= 0 ? section.runningBalances[itemIndex] : undefined;
             return (
               <PartyDayEntryCard
                 time={item.time}
+                date={item.date}
                 note={isOpening ? 'Opening Balance' : item.note}
                 give={item.direction === 'out' ? item.amount : null}
                 receive={item.direction === 'in' ? item.amount : null}
+                runningBalance={runningBalance}
                 hasAttachments={item.hasAttachments}
                 onPress={isOpening ? undefined : () => openEntry(item)}
               />

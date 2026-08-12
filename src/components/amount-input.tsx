@@ -15,7 +15,14 @@ export function AmountInput({ value, onChangeText }: AmountInputProps) {
   const theme = useTheme();
 
   const handleChange = (text: string) => {
-    onChangeText(text.replace(/[^0-9]/g, ''));
+    // Allow digits and a single decimal point
+    const cleaned = text.replace(/[^0-9.]/g, '');
+    const parts = cleaned.split('.');
+    if (parts.length > 2) {
+      onChangeText(parts[0] + '.' + parts.slice(1).join(''));
+    } else {
+      onChangeText(cleaned);
+    }
   };
 
   const preview = value ? formatINR(parseFloat(value)) : 'Enter amount';

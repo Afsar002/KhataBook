@@ -1,3 +1,23 @@
+Khata ledger: date/time, running balance, notes (2026-08-12)
+
+The customer/supplier ledger now shows:
+- **Date + Time** on the left (date above time)
+- **Running balance** in a green pill under the time
+- **Notes** (when present) under the running balance
+Works for both **customers** and **suppliers** — running balance increases on
+"In" (receive/take) and decreases on "Out" (give/pay).
+
+Amount input: decimal support (2026-08-12)
+
+The amount field now accepts a decimal point — type `150.50` instead of just
+`15050`. Single dot allowed; auto-strips invalid characters.
+
+Date picker: manual entry with auto-slash (2026-08-12)
+
+Tap the "Type" button next to any date picker to switch to manual entry.
+Input auto-formats as `DD/MM/YYYY` with slashes inserted automatically.
+Validates day/month/year ranges and min/max bounds before accepting.
+
 Cashbook is now the launch screen (2026-08-12)
 
 The app opens on the **Cashbook** (today's ledger) instead of the Home

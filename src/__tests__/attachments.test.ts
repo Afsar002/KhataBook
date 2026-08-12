@@ -6,7 +6,6 @@
  * caps, and graceful degradation for missing local files. Every case must
  * never throw unexpectedly — the util's contract is "toast, don't crash".
  */
-import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 
@@ -77,10 +76,6 @@ jest.mock('expo-image-picker', () => ({
   launchCameraAsync: jest.fn(),
   requestCameraPermissionsAsync: jest.fn(),
 }));
-jest.mock('expo-image-manipulator', () => ({
-  manipulateAsync: jest.fn(),
-  SaveFormat: { JPEG: 'jpeg' },
-}));
 jest.mock('expo-sharing', () => ({
   isAvailableAsync: jest.fn().mockResolvedValue(true),
   shareAsync: jest.fn().mockResolvedValue(undefined),
@@ -89,12 +84,10 @@ jest.mock('expo-sharing', () => ({
 const launchImageLibraryAsync = ImagePicker.launchImageLibraryAsync as jest.Mock;
 const launchCameraAsync = ImagePicker.launchCameraAsync as jest.Mock;
 const requestCameraPermissionsAsync = ImagePicker.requestCameraPermissionsAsync as jest.Mock;
-const manipulateAsync = ImageManipulator.manipulateAsync as jest.Mock;
 const shareAsync = Sharing.shareAsync as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
-  manipulateAsync.mockResolvedValue({ uri: 'file://manipulated.jpg', width: 1600, height: 800 });
   requestCameraPermissionsAsync.mockResolvedValue({ granted: true });
 });
 
@@ -207,7 +200,6 @@ describe('pickAttachment — image', () => {
   it('returns null when the user cancels', async () => {
     launchImageLibraryAsync.mockResolvedValue({ canceled: true, assets: null });
     await expect(pickAttachment('image')).resolves.toBeNull();
-    expect(manipulateAsync).not.toHaveBeenCalled();
   });
 
   it('rejects an oversized image with a friendly message (no crash)', async () => {
@@ -218,35 +210,19 @@ describe('pickAttachment — image', () => {
     await expect(pickAttachment('image')).rejects.toThrow(/larger than 15 MB/i);
   });
 
-  it('compresses (resize long edge + JPEG) and stores a verified copy', async () => {
+  it('uses picker quality option and stores a verified copy', async () => {
     const meta = await pickAttachment('image');
     expect(meta).not.toBeNull();
     expect(meta!.kind).toBe('image');
     expect(meta!.mimeType).toBe('image/jpeg');
     expect(meta!.name).toBe('Big Photo.png');
     expect(meta!.size).toBeGreaterThan(0);
-    // 3000x1500 exceeds 1600 → resized by width, saved as JPEG @ 0.7.
-    expect(manipulateAsync).toHaveBeenCalledWith(
-      'file://library/big.png',
-      [{ resize: { width: 1600 } }],
-      { compress: 0.7, format: 'jpeg' }
+    // The picker was called with quality: 0.7
+    expect(launchImageLibraryAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ quality: 0.7 })
     );
     // The copied file is visible at its stored uri.
     expect(attachmentFileUri(meta!)).toBe(STORED_URI);
-  });
-
-  it('does not upscale a small image (no resize actions)', async () => {
-    launchImageLibraryAsync.mockResolvedValue({
-      canceled: false,
-      assets: [{ uri: 'file://library/small.png', fileSize: 500, width: 800, height: 600, fileName: 'small.png' }],
-    });
-    const meta = await pickAttachment('image');
-    expect(meta!.kind).toBe('image');
-    expect(manipulateAsync).toHaveBeenCalledWith(
-      'file://library/small.png',
-      [],
-      expect.objectContaining({ compress: 0.7, format: 'jpeg' })
-    );
   });
 });
 
@@ -282,17 +258,15 @@ describe('pickAttachment — camera', () => {
     await expect(pickAttachment('camera')).resolves.toBeNull();
   });
 
-  it('compresses and stores the captured photo', async () => {
+  it('uses picker quality option and stores the captured photo', async () => {
     const meta = await pickAttachment('camera');
     expect(meta).not.toBeNull();
     expect(meta!.kind).toBe('image');
     expect(meta!.mimeType).toBe('image/jpeg');
     expect(meta!.name).toBe('IMG_001.jpg');
-    // 3000x4000 portrait → resized by height to 1600.
-    expect(manipulateAsync).toHaveBeenCalledWith(
-      'file://camera/shot.png',
-      [{ resize: { height: 1600 } }],
-      { compress: 0.7, format: 'jpeg' }
+    // The picker was called with quality: 0.7
+    expect(launchCameraAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ quality: 0.7 })
     );
     expect(attachmentFileUri(meta!)).toBe(STORED_URI);
   });

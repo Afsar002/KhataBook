@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { AccountPicker } from '@/components/account-picker';
-import { AmountInput } from '@/components/amount-input';
+import { CalculatorInput } from '@/components/calculator-input';
 import { Card } from '@/components/card';
 import { CategoryPicker } from '@/components/category-picker';
 import { DatePicker } from '@/components/date-picker';
@@ -212,7 +212,11 @@ export function TransactionForm({ type, editingId, defaultDate }: TransactionFor
         <ThemedText type="smallBold" themeColor="textSecondary">
           Amount
         </ThemedText>
-        <AmountInput value={amount} onChangeText={setAmount} />
+        <CalculatorInput
+          onChangeAmount={(value) => setAmount(String(value))}
+          placeholder="Enter amount"
+          accessibilityLabel="Transaction amount"
+        />
       </Card>
 
       <Card style={styles.card}>
