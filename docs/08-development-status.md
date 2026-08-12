@@ -208,6 +208,15 @@
 - ✓ Verified: `pdf-layout` / `statement` / `party-statement-pdf` suites pass;
     full suite 42 suites / 403 tests green
 
+## Completed (Cashbook is the launch screen 2026-08-12)
+
+- ✓ App opens on the Cashbook (today's ledger) instead of Home: the Cashbook
+    tab is now the `index` route that `/` resolves to. `initialRouteName` alone
+    couldn't do this — expo-router overrides it with the URL on cold start —
+    so Home moved to `/home` beside it (same tab order)
+- ✓ Post-login / post-onboarding redirects (`router.replace('/')`) now land on
+    the Cashbook too; no references to the old `/history` tab route remain
+
 ## Completed (OTA update-downloaded notification 2026-08-12)
 
 - ✓ When an over-the-air update finishes downloading, the user is told — in-app

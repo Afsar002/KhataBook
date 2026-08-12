@@ -33,8 +33,8 @@ function activeTabName(pathname: string): string {
 
 /** Typed href per tab so `router.navigate` stays route-validated. */
 const TAB_HREFS: Record<string, Href> = {
+  home: '/home',
   index: '/',
-  history: '/history',
   khata: '/khata',
   reports: '/reports',
   settings: '/settings',

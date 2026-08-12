@@ -7,10 +7,17 @@ import { InterFonts } from '@/constants/theme';
 import { useResponsiveLayout } from '@/hooks/use-responsive';
 import { useTheme } from '@/hooks/use-theme';
 
-/** Route → tab title/icon, kept in one place so renames are a one-liner. */
+/**
+ * Route → tab title/icon, kept in one place so renames are a one-liner.
+ *
+ * `index` is the Cashbook: expo-router resolves `/` to the `index` route, so
+ * making the Cashbook the index (not the `initialRouteName` prop, which
+ * expo-router overrides with the URL on cold start) is what makes the app
+ * open on the Cashbook instead of Home. Home lives at `/home` right beside it.
+ */
 const TAB_META: SidebarItem[] = [
-  { name: 'index', title: 'Home', Icon: Home },
-  { name: 'history', title: 'Cashbook', Icon: NotebookPen },
+  { name: 'home', title: 'Home', Icon: Home },
+  { name: 'index', title: 'Cashbook', Icon: NotebookPen },
   { name: 'khata', title: 'Khata', Icon: BookOpen },
   { name: 'reports', title: 'Reports', Icon: BarChart3 },
   { name: 'settings', title: 'Settings', Icon: Settings },
@@ -35,7 +42,7 @@ export default function TabsLayout() {
 
   return (
     <Tabs
-      initialRouteName="history"
+      initialRouteName="index"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: theme.primary,

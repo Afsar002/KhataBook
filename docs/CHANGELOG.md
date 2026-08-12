@@ -1,3 +1,12 @@
+Cashbook is now the launch screen (2026-08-12)
+
+The app opens on the **Cashbook** (today's ledger) instead of the Home
+dashboard. The Cashbook tab is now the route that `/` resolves to (it was
+already `initialRouteName="history"`, but expo-router overrides that prop with
+the URL on cold start, so `/` kept landing on Home). Home lives at `/home`
+beside it — same tab order, and post-login/onboarding lands on Cashbook too.
+No route references to the old `/history` tab path remain.
+
 OTA update-downloaded notification (2026-08-12)
 
 When an over-the-air update finishes downloading, the app now says so — an
