@@ -583,13 +583,16 @@ export interface TransactionsPdfInput {
   dateFrom: string;
   /** Inclusive `YYYY-MM-DD` upper bound. */
   dateTo: string;
-  /** Chronological feed (oldest first). */
+  /** Feed rows. Reversed inside so the PDF always prints oldest → newest. */
   entries: LedgerRow[];
 }
 
 /** Renders a "Transactions Report" with a summary box and a Date | Type | Note | Category/Account | Amount table. */
 export async function buildTransactionsPdf(input: TransactionsPdfInput): Promise<Uint8Array> {
-  const { dateFrom, dateTo, entries } = input;
+  const { dateFrom, dateTo, entries: newestFirst } = input;
+  // Ledgers come in newest-first (matching the app's screens); the report reads
+  // chronologically, so print oldest → newest.
+  const entries = newestFirst.slice().reverse();
   const doc = await PDFDocument.create();
   const { regular, bold, rupee } = await embedFonts(doc);
   const r = new Renderer(doc, regular, bold, rupee);
