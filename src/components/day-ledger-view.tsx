@@ -3,18 +3,18 @@
  * the summary card, the day header row, the 3-column entry list and the sticky
  * Withdraw / Deposit buttons. The parent screen supplies the top bar.
  */
-import { ChevronRight } from 'lucide-react-native';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { ChevronRight } from "lucide-react-native";
+import { FlatList, Pressable, StyleSheet, View } from "react-native";
 
-import { Card } from '@/components/card';
-import { DayEntryCard } from '@/components/day-entry-card';
-import { EmptyState } from '@/components/empty-state';
-import { LargeButton } from '@/components/large-button';
-import { ThemedText } from '@/components/themed-text';
-import { InterFonts, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
-import type { LedgerRow } from '@/types';
-import { formatINR } from '@/utils/format';
+import { Card } from "@/components/card";
+import { DayEntryCard } from "@/components/day-entry-card";
+import { EmptyState } from "@/components/empty-state";
+import { LargeButton } from "@/components/large-button";
+import { ThemedText } from "@/components/themed-text";
+import { InterFonts, Spacing } from "@/constants/theme";
+import { useTheme } from "@/hooks/use-theme";
+import type { LedgerRow } from "@/types";
+import { formatINR } from "@/utils/format";
 
 type DayLedgerViewProps = {
   /** Day label for the header, e.g. "11 Aug". */
@@ -71,7 +71,9 @@ export function DayLedgerView({
               {formatINR(cashInHand)}
             </ThemedText>
           </View>
-          <View style={[styles.summaryDivider, { backgroundColor: theme.border }]} />
+          <View
+            style={[styles.summaryDivider, { backgroundColor: theme.border }]}
+          />
           <View style={styles.summaryCell}>
             <ThemedText type="small" themeColor="textSecondary">
               {balanceLabel}
@@ -90,9 +92,10 @@ export function DayLedgerView({
               styles.reportRow,
               { borderTopColor: theme.border },
               pressed && styles.pressed,
-            ]}>
+            ]}
+          >
             <ThemedText type="smallBold" style={styles.reportRowText}>
-              VIEW DEPOSIT & WITHDRAW REPORT
+              VIEW DEPOSIT & WITHDRAW
             </ThemedText>
             <ChevronRight size={18} color={theme.text} />
           </Pressable>
@@ -105,7 +108,7 @@ export function DayLedgerView({
         <View style={styles.headerDate}>
           <ThemedText style={styles.headerTitle}>{title}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            {count} {count === 1 ? 'Entry' : 'Entries'}
+            {count} {count === 1 ? "Entry" : "Entries"}
           </ThemedText>
         </View>
         <View style={styles.headerTotalCol}>
@@ -133,12 +136,12 @@ export function DayLedgerView({
         renderItem={({ item }) => (
           <DayEntryCard
             time={item.time}
-            pill={item.categoryName ?? undefined}
-            withdraw={item.kind === 'expense' ? item.amount : null}
-            deposit={item.kind === 'income' ? item.amount : null}
+            pill={item.note ?? item.categoryName ?? undefined}
+            withdraw={item.kind === "expense" ? item.amount : null}
+            deposit={item.kind === "income" ? item.amount : null}
             hasAttachments={item.hasAttachments}
             onPress={
-              onPressEntry && item.entryKind !== 'opening'
+              onPressEntry && item.entryKind !== "opening"
                 ? () => onPressEntry(item)
                 : undefined
             }
@@ -182,26 +185,26 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     gap: 0,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOpacity: 0.06,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
   summaryTop: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
+    flexDirection: "row",
+    alignItems: "stretch",
   },
   summaryCell: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: "center",
     gap: Spacing.one,
     paddingVertical: Spacing.three,
     paddingHorizontal: Spacing.two,
   },
   summaryDivider: {
     width: StyleSheet.hairlineWidth,
-    alignSelf: 'stretch',
+    alignSelf: "stretch",
     marginVertical: Spacing.three,
   },
   summaryAmount: {
@@ -209,9 +212,9 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   reportRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: Spacing.one,
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingVertical: Spacing.two,
@@ -223,13 +226,13 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: Spacing.three,
   },
   headerDate: {
     flex: 2,
-    alignItems: 'flex-start',
+    alignItems: "flex-start",
   },
   headerTitle: {
     fontFamily: InterFonts.bold,
@@ -237,11 +240,11 @@ const styles = StyleSheet.create({
   },
   headerTotalCol: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: "center",
     gap: Spacing.half,
   },
   headerTotalRight: {
-    alignItems: 'flex-end',
+    alignItems: "flex-end",
   },
   list: {
     flex: 1,
@@ -253,7 +256,7 @@ const styles = StyleSheet.create({
     height: Spacing.two,
   },
   actions: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: Spacing.two,
     paddingTop: Spacing.three,
     paddingBottom: Spacing.three,

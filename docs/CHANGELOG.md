@@ -7,6 +7,12 @@ the URL on cold start, so `/` kept landing on Home). Home lives at `/home`
 beside it — same tab order, and post-login/onboarding lands on Cashbook too.
 No route references to the old `/history` tab path remain.
 
+Cashbook entry pills show notes (2026-08-12)
+
+The grey pill under the time column now displays the entry's **note** when
+present, falling back to the **category** when the note is empty — so
+user-written context is surfaced first in the daily ledger.
+
 OTA update-downloaded notification (2026-08-12)
 
 When an over-the-air update finishes downloading, the app now says so — an

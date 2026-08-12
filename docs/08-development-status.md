@@ -217,6 +217,14 @@
 - ✓ Post-login / post-onboarding redirects (`router.replace('/')`) now land on
     the Cashbook too; no references to the old `/history` tab route remain
 
+## Completed (Cashbook entry pills show notes 2026-08-12)
+
+- ✓ The grey pill under the time column now displays the entry's **note** when
+    present, falling back to the **category** when the note is empty — so
+    user-written context is surfaced first in the daily ledger
+- ✓ Shared `DayEntryCard` component updated in `src/components/day-ledger-view.tsx`
+    (used by Cashbook tab, day detail, Home recent)
+
 ## Completed (OTA update-downloaded notification 2026-08-12)
 
 - ✓ When an over-the-air update finishes downloading, the user is told — in-app
