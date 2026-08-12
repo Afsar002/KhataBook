@@ -2,7 +2,7 @@
  * Notes field for an entry form — the note input plus its attachments.
  *
  * A small paperclip icon sits at the right edge of the input; tapping it offers
- * Add Photo / Add PDF. Attached files render as chips (thumbnail for images,
+ * Take Photo / Add Photo / Add PDF. Attached files render as chips (thumbnail for images,
  * FileText + name for PDFs) beneath the input — tap a chip to view, ✕ to remove.
  *
  * Crash-safe by construction: every pick/compress is wrapped so a bad file
@@ -10,7 +10,7 @@
  * and a missing local file (synced metadata without the bytes) toasts instead
  * of throwing.
  */
-import { FileText, ImagePlus, Paperclip, Share, X } from 'lucide-react-native';
+import { Camera, FileText, ImagePlus, Paperclip, Share, X } from 'lucide-react-native';
 import { useState } from 'react';
 import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +27,7 @@ import {
   openAttachment,
   pickAttachment,
   removeAttachmentFiles,
+  type AttachmentPickKind,
 } from '@/utils/attachments';
 
 type NoteFieldProps = {
@@ -48,10 +49,10 @@ export function NoteField({
 }: NoteFieldProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const [busy, setBusy] = useState<'image' | 'pdf' | null>(null);
+  const [busy, setBusy] = useState<AttachmentPickKind | null>(null);
   const [viewer, setViewer] = useState<number | null>(null);
 
-  const pick = async (kind: 'image' | 'pdf') => {
+  const pick = async (kind: AttachmentPickKind) => {
     setBusy(kind);
     try {
       const meta = await pickAttachment(kind);
@@ -79,6 +80,7 @@ export function NoteField({
     feedback.sheet({
       title: 'Add attachment',
       options: [
+        { label: 'Take Photo', icon: Camera, onPress: () => void pick('camera') },
         { label: 'Add Photo', icon: ImagePlus, onPress: () => void pick('image') },
         { label: 'Add PDF', icon: FileText, onPress: () => void pick('pdf') },
       ],

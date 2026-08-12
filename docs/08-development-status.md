@@ -184,6 +184,19 @@
 - ✓ 15 new tests (real-SQLite day aggregation + date-label helpers); full
     suite 358 green
 
+## Completed (Camera capture + Cashbook PDF columns 2026-08-12)
+
+- ✓ Attachments now offer **Take Photo** — `launchCameraAsync` runs through the
+    same compress/store pipeline as gallery picks (15 MB cap, 1600 px long-edge
+    resize, JPEG @ 0.7, verified copy), permission requested up front and
+    denial toasts; `cameraPermission` added to the image-picker plugin
+- ✓ Transactions report (Cashbook PDF): Notes + Category merged into one column
+    (category double-spaced below the note), signed Amount column replaced with
+    **Deposit / Withdraw / Balance** — running balance = income − expense,
+    transfers unchanged, totals row shows total deposit / total withdraw / net
+- ✓ PDF regression verified (pdf-layout / statement / party-statement suites);
+    full suite 403 green, tsc 0 errors, eslint 0 problems
+
 ## Removed
 
 - Local Unlock Protection (v1.11) was never wired in — removed in the

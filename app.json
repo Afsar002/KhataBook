@@ -48,7 +48,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow DailyKhata to attach photos from your library to entries."
+          "photosPermission": "Allow DailyKhata to attach photos from your library to entries.",
+          "cameraPermission": "Allow DailyKhata to take photos to attach to entries."
         }
       ],
       [

@@ -132,27 +132,41 @@ async function copyIntoAttachments(sourceUri: string, filename: string): Promise
   return destination.size;
 }
 
+export type AttachmentPickKind = 'image' | 'pdf' | 'camera';
+
+/** Shape of an image-picker asset (gallery and camera both return this). */
+interface PickedImage {
+  uri?: string | null;
+  fileSize?: number | null;
+  width?: number | null;
+  height?: number | null;
+  fileName?: string | null;
+}
+
 /**
- * Picks an image (compress → store) or a PDF (store). Returns the attachment
- * metadata, or null when the user cancelled. Throws a descriptive Error on any
- * failure (size cap, unwritable file) — callers toast and continue.
+ * Picks an image from the gallery or camera (compress → store), or a PDF
+ * (store). Returns the attachment metadata, or null when the user cancelled.
+ * Throws a descriptive Error on any failure (size cap, denied permission,
+ * unwritable file) — callers toast and continue.
  */
-export async function pickAttachment(kind: 'image' | 'pdf'): Promise<AttachmentMeta | null> {
+export async function pickAttachment(kind: AttachmentPickKind): Promise<AttachmentMeta | null> {
   if (kind === 'image') {
     return pickImage();
+  }
+  if (kind === 'camera') {
+    return pickCamera();
   }
   return pickPdf();
 }
 
-async function pickImage(): Promise<AttachmentMeta | null> {
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: 'images',
-    allowsMultipleSelection: false,
-  });
-  if (result.canceled) {
-    return null;
-  }
-  const asset = result.assets?.[0];
+/**
+ * Shared image pipeline for gallery + camera picks: size cap → optional resize
+ * → JPEG re-encode → verified copy into the attachments dir.
+ */
+async function compressAndStoreImage(
+  asset: PickedImage | undefined | null,
+  fallbackName: string
+): Promise<AttachmentMeta | null> {
   if (!asset?.uri) {
     return null;
   }
@@ -181,7 +195,7 @@ async function pickImage(): Promise<AttachmentMeta | null> {
 
   const meta: AttachmentMeta = {
     id: uuid(),
-    name: asset.fileName?.trim() || 'photo.jpg',
+    name: asset.fileName?.trim() || fallbackName,
     mimeType: 'image/jpeg',
     size: 0,
     kind: 'image',
@@ -192,6 +206,33 @@ async function pickImage(): Promise<AttachmentMeta | null> {
   }
   meta.size = await copyIntoAttachments(manipulated.uri, filename);
   return meta;
+}
+
+async function pickImage(): Promise<AttachmentMeta | null> {
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: 'images',
+    allowsMultipleSelection: false,
+  });
+  if (result.canceled) {
+    return null;
+  }
+  return compressAndStoreImage(result.assets?.[0], 'photo.jpg');
+}
+
+/** Opens the camera to take a photo, then runs the same compress/store pipeline. */
+async function pickCamera(): Promise<AttachmentMeta | null> {
+  const permission = await ImagePicker.requestCameraPermissionsAsync();
+  if (!permission.granted) {
+    throw new Error('Camera permission is needed to take a photo.');
+  }
+  const result = await ImagePicker.launchCameraAsync({
+    mediaTypes: 'images',
+    allowsMultipleSelection: false,
+  });
+  if (result.canceled) {
+    return null;
+  }
+  return compressAndStoreImage(result.assets?.[0], 'camera.jpg');
 }
 
 async function pickPdf(): Promise<AttachmentMeta | null> {

@@ -1,3 +1,27 @@
+Camera capture + Cashbook PDF columns (2026-08-12)
+
+Two follow-ups to the attachments + transactions report work.
+
+- **Camera capture for attachments** — the Note field's paperclip sheet now
+  offers **Take Photo** (camera) alongside Add Photo / Add PDF. Captures run
+  through the same crash-safe pipeline as gallery picks: size cap (15 MB),
+  long-edge resize to 1600 px, JPEG re-encode @ 0.7, verified copy into the
+  attachments dir. Camera permission is requested up front; denial toasts
+  instead of crashing. `cameraPermission` string added to the
+  `expo-image-picker` plugin in `app.json`.
+- **Transactions report (Cashbook PDF) columns** — Notes and Category now
+  share a single column (category sits double-spaced below the note instead of
+  in its own column). The old signed Amount column is replaced with **Deposit**
+  (income, green) and **Withdraw** (expense, red) columns plus a **Balance**
+  column carrying the running balance: income adds, expense subtracts,
+  transfers leave it unchanged (mirroring the summary's Net). The totals row
+  shows total deposit / total withdraw / net balance. Amount columns stay
+  right-anchored so the Balance edge meets the right margin; the
+  Notes/Category column fills the band in between.
+- PDF regression verified: `pdf-layout`, `statement`, `party-statement-pdf`,
+  `statement-pdf` suites still pass. Full suite: 42 suites, 403 tests green;
+  `tsc` 0 errors, eslint 0 problems.
+
 Attachments — images & PDFs on entries (2026-08-11)
 
 Income/expense and khata (give/receive/take/pay) entries can now carry up to

@@ -72,7 +72,11 @@ jest.mock('expo-file-system', () => {
   };
 });
 
-jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
+jest.mock('expo-image-picker', () => ({
+  launchImageLibraryAsync: jest.fn(),
+  launchCameraAsync: jest.fn(),
+  requestCameraPermissionsAsync: jest.fn(),
+}));
 jest.mock('expo-image-manipulator', () => ({
   manipulateAsync: jest.fn(),
   SaveFormat: { JPEG: 'jpeg' },
@@ -83,12 +87,15 @@ jest.mock('expo-sharing', () => ({
 }));
 
 const launchImageLibraryAsync = ImagePicker.launchImageLibraryAsync as jest.Mock;
+const launchCameraAsync = ImagePicker.launchCameraAsync as jest.Mock;
+const requestCameraPermissionsAsync = ImagePicker.requestCameraPermissionsAsync as jest.Mock;
 const manipulateAsync = ImageManipulator.manipulateAsync as jest.Mock;
 const shareAsync = Sharing.shareAsync as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
   manipulateAsync.mockResolvedValue({ uri: 'file://manipulated.jpg', width: 1600, height: 800 });
+  requestCameraPermissionsAsync.mockResolvedValue({ granted: true });
 });
 
 const STORED_URI = '/mock/documents/attachments/a1b2c3d4-e5f6-7890-abcd-ef1234567890.jpg';
@@ -240,6 +247,54 @@ describe('pickAttachment — image', () => {
       [],
       expect.objectContaining({ compress: 0.7, format: 'jpeg' })
     );
+  });
+});
+
+describe('pickAttachment — camera', () => {
+  beforeEach(() => {
+    launchCameraAsync.mockResolvedValue({
+      canceled: false,
+      assets: [
+        {
+          uri: 'file://camera/shot.png',
+          fileSize: 3 * 1024 * 1024,
+          width: 3000,
+          height: 4000,
+          fileName: 'IMG_001.jpg',
+        },
+      ],
+    });
+  });
+
+  it('asks for camera permission first', async () => {
+    await pickAttachment('camera');
+    expect(requestCameraPermissionsAsync).toHaveBeenCalled();
+  });
+
+  it('throws a friendly error when camera permission is denied', async () => {
+    requestCameraPermissionsAsync.mockResolvedValue({ granted: false });
+    await expect(pickAttachment('camera')).rejects.toThrow(/camera permission/i);
+    expect(launchCameraAsync).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the user cancels the camera', async () => {
+    launchCameraAsync.mockResolvedValue({ canceled: true, assets: null });
+    await expect(pickAttachment('camera')).resolves.toBeNull();
+  });
+
+  it('compresses and stores the captured photo', async () => {
+    const meta = await pickAttachment('camera');
+    expect(meta).not.toBeNull();
+    expect(meta!.kind).toBe('image');
+    expect(meta!.mimeType).toBe('image/jpeg');
+    expect(meta!.name).toBe('IMG_001.jpg');
+    // 3000x4000 portrait → resized by height to 1600.
+    expect(manipulateAsync).toHaveBeenCalledWith(
+      'file://camera/shot.png',
+      [{ resize: { height: 1600 } }],
+      { compress: 0.7, format: 'jpeg' }
+    );
+    expect(attachmentFileUri(meta!)).toBe(STORED_URI);
   });
 });
 

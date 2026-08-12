@@ -326,7 +326,20 @@ const DEFAULT_STATEMENT_INCLUDE: StatementInclude = {
   runningBalance: true,
 };
 
-type ColumnKey = 'date' | 'desc' | 'notes' | 'debit' | 'credit' | 'running' | 'type' | 'note' | 'cat' | 'amount';
+type ColumnKey =
+  | 'date'
+  | 'desc'
+  | 'notes'
+  | 'debit'
+  | 'credit'
+  | 'running'
+  | 'type'
+  | 'note'
+  | 'cat'
+  | 'amount'
+  | 'deposit'
+  | 'withdraw'
+  | 'balance';
 
 interface Column {
   key: ColumnKey;
@@ -347,6 +360,9 @@ const COL_LABELS: Record<ColumnKey, string> = {
   note: 'Note',
   cat: 'Category / Account',
   amount: 'Amount',
+  deposit: 'Deposit',
+  withdraw: 'Withdraw',
+  balance: 'Balance',
 };
 
 /**
@@ -587,7 +603,7 @@ export interface TransactionsPdfInput {
   entries: LedgerRow[];
 }
 
-/** Renders a "Transactions Report" with a summary box and a Date | Type | Note | Category/Account | Amount table. */
+/** Renders a "Transactions Report" with a summary box and a Date | Notes/Category | Deposit | Withdraw | Balance table. */
 export async function buildTransactionsPdf(input: TransactionsPdfInput): Promise<Uint8Array> {
   const { dateFrom, dateTo, entries: newestFirst } = input;
   // Ledgers come in newest-first (matching the app's screens); the report reads
@@ -615,12 +631,22 @@ export async function buildTransactionsPdf(input: TransactionsPdfInput): Promise
     { label: 'Net Balance', value: r.money(net), color: net >= 0 ? BRAND : RED },
   ]);
 
-  // Table columns: Date | Note | Category/Account | Amount
+  // Table columns: Date | Notes/Category | Deposit | Withdraw | Balance.
+  // The three amount columns are right-anchored so the Balance edge meets the
+  // right margin; the Notes/Category column fills the band in between.
+  const gap = 8;
+  const dateW = 56;
+  const amountW = 72;
+  const balanceW = 82;
+  const firstAmountX = PAGE_W - MARGIN - (amountW * 2 + balanceW + gap * 2);
+  const notesX = MARGIN + dateW + gap;
+  const notesW = firstAmountX - notesX - gap;
   const cols: Column[] = [
-    { key: 'date', label: 'Date', x: MARGIN, width: 60, align: 'left' },
-    { key: 'note', label: 'Note', x: MARGIN + 68, width: 200, align: 'left' },
-    { key: 'cat', label: 'Category / Account', x: MARGIN + 276, width: 180, align: 'left' },
-    { key: 'amount', label: 'Amount', x: MARGIN + 464, width: 43, align: 'right' },
+    { key: 'date', label: 'Date', x: MARGIN, width: dateW, align: 'left' },
+    { key: 'note', label: 'Notes / Category', x: notesX, width: notesW, align: 'left' },
+    { key: 'deposit', label: 'Deposit', x: firstAmountX, width: amountW, align: 'right' },
+    { key: 'withdraw', label: 'Withdraw', x: firstAmountX + amountW + gap, width: amountW, align: 'right' },
+    { key: 'balance', label: 'Balance', x: firstAmountX + (amountW + gap) * 2, width: balanceW, align: 'right' },
   ];
 
   drawTableHeader(r, cols);
@@ -629,12 +655,14 @@ export async function buildTransactionsPdf(input: TransactionsPdfInput): Promise
     drawEmptyTable(r, 'No transactions in this range.');
   } else {
     let zebra = false;
+    let running = 0;
     for (const entry of entries) {
-      drawTransactionRow(r, cols, entry, zebra);
+      running = drawTransactionRow(r, cols, entry, running, zebra);
       zebra = !zebra;
     }
-    // Totals row
-    drawTransactionTotals(r, cols, totalIncome);
+    // Totals row — the Balance cell shows the final running balance, which
+    // equals totalIncome − totalExpense (transfers never move the running sum).
+    drawTransactionTotals(r, cols, totalIncome, totalExpense);
   }
 
   addFooters(r);
@@ -650,55 +678,76 @@ function rowCategoryAccount(entry: LedgerRow): string {
   return entry.categoryName ?? entry.accountName ?? '';
 }
 
-/** One transactions-report row. Amount is signed & colored: income +BRAND, expense −RED, transfer/opening plain DARK. */
-function drawTransactionRow(r: Renderer, cols: Column[], entry: LedgerRow, zebra: boolean): void {
+/**
+ * One transactions-report row. Notes and category share a single column — the
+ * category sits double-spaced below the note. Income → Deposit (BRAND), expense
+ * → Withdraw (RED), and Balance carries the running balance (transfers leave it
+ * unchanged). Returns the running balance after this row.
+ */
+function drawTransactionRow(r: Renderer, cols: Column[], entry: LedgerRow, running: number, zebra: boolean): number {
   const catAcc = rowCategoryAccount(entry);
   const isIncome = entry.kind === 'income';
   const isExpense = entry.kind === 'expense';
+  if (isIncome) running += entry.amount;
+  else if (isExpense) running -= entry.amount;
 
-  let amountText = '';
-  let amountColor: RenderColor = DARK;
-  if (isIncome) {
-    amountText = '+' + r.money(entry.amount, r.regular);
-    amountColor = BRAND;
-  } else if (isExpense) {
-    amountText = '-' + r.money(entry.amount, r.regular);
-    amountColor = RED;
-  } else {
-    amountText = r.money(entry.amount, r.regular);
-    amountColor = DARK;
-  }
+  const noteCol = cols.find((c) => c.key === 'note') ?? cols[1];
+  const depositCol = cols.find((c) => c.key === 'deposit') ?? cols[2];
+  const withdrawCol = cols.find((c) => c.key === 'withdraw') ?? cols[3];
+  const balanceCol = cols.find((c) => c.key === 'balance') ?? cols[4];
 
-  // Note column falls back to category/account when empty
-  const noteText = entry.note || catAcc;
+  // Notes / Category — one column: note first, category below with a small gap.
+  const noteLines = entry.note ? r.fit(entry.note, r.regular, 9.5, noteCol.width - 2, 2) : [];
+  const catLines = catAcc ? r.fit(catAcc, r.regular, 8.5, noteCol.width - 2, 2) : [];
+  const noteH = noteLines.length * 10;
+  const catGap = noteLines.length > 0 && catLines.length > 0 ? 2 : 0;
+  const catH = catLines.length * 9;
+  const rowH = Math.max(16, noteH + catGap + catH + 2);
 
-  r.ensure(22);
+  r.ensure(rowH + 4);
   const y = r.y;
-  if (zebra) r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 16, color: LIGHT });
+  if (zebra) r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: rowH, color: LIGHT });
 
   // Date
   r.draw(formatISOToDisplay(entry.date), cols[0].x, y, 9.5, r.regular, DARK);
-  // Note (wraps to 2 lines max)
-  const noteLines = r.fit(noteText, r.regular, 9.5, cols[1].width - 2, 2);
-  noteLines.forEach((line, i) => r.draw(line, cols[1].x, y - i * 10, 9.5, r.regular, DARK));
-  // Category/Account (wraps to 2 lines max)
-  const catLines = r.fit(catAcc, r.regular, 8.5, cols[2].width - 2, 2);
-  catLines.forEach((line, i) => r.draw(line, cols[2].x, y - i * 10, 8.5, r.regular, GRAY));
-  // Amount (right aligned)
-  r.drawRight(amountText, cols[3].x + cols[3].width, y, 9.5, r.regular, amountColor);
+  // Note (wraps to 2 lines max); when there's no note and no category, a dash
+  // keeps the row legible.
+  if (noteLines.length > 0) {
+    noteLines.forEach((line, i) => r.draw(line, noteCol.x, y - i * 10, 9.5, r.regular, DARK));
+  } else if (catLines.length === 0) {
+    r.draw('—', noteCol.x, y, 9.5, r.regular, MUTED);
+  }
+  // Category/Account (wraps to 2 lines max, grey, below the note).
+  catLines.forEach((line, i) => r.draw(line, noteCol.x, y - noteH - catGap - i * 9, 8.5, r.regular, GRAY));
 
-  r.y = y - 20;
+  // Deposit / Withdraw / Balance (right aligned). Non-applicable cells get a dash.
+  const depositText = isIncome ? r.money(entry.amount, r.regular) : '—';
+  const withdrawText = isExpense ? r.money(entry.amount, r.regular) : '—';
+  r.drawRight(depositText, depositCol.x + depositCol.width, y, 9.5, r.regular, isIncome ? BRAND : MUTED);
+  r.drawRight(withdrawText, withdrawCol.x + withdrawCol.width, y, 9.5, r.regular, isExpense ? RED : MUTED);
+  const balanceColor = running >= 0 ? DARK : RED;
+  r.drawRight(r.money(running, r.regular), balanceCol.x + balanceCol.width, y, 9.5, r.regular, balanceColor);
+
+  r.y = y - rowH;
+  return running;
 }
 
 /** Totals row at the bottom of the transactions table. */
-function drawTransactionTotals(r: Renderer, cols: Column[], totalIncome: number): void {
+function drawTransactionTotals(r: Renderer, cols: Column[], totalIncome: number, totalExpense: number): void {
   r.ensure(26);
   const y = r.y;
   r.page.drawRectangle({ x: MARGIN, y: y + 2, width: CONTENT_W, height: 0.8, color: BORDER });
   r.page.drawRectangle({ x: MARGIN, y: y - 2, width: CONTENT_W, height: 16, color: LIGHT });
 
   r.draw('Totals', MARGIN + 8, y, 9.5, r.bold, DARK);
-  r.drawRight(r.money(totalIncome), cols[3].x + cols[3].width, y, 9.5, r.bold, BRAND);
+  const depositCol = cols.find((c) => c.key === 'deposit') ?? cols[2];
+  const withdrawCol = cols.find((c) => c.key === 'withdraw') ?? cols[3];
+  const balanceCol = cols.find((c) => c.key === 'balance') ?? cols[4];
+  r.drawRight(r.money(totalIncome), depositCol.x + depositCol.width, y, 9.5, r.bold, BRAND);
+  r.drawRight(r.money(totalExpense), withdrawCol.x + withdrawCol.width, y, 9.5, r.bold, RED);
+  const net = totalIncome - totalExpense;
+  const netColor = net >= 0 ? BRAND : RED;
+  r.drawRight(r.money(net), balanceCol.x + balanceCol.width, y, 9.5, r.bold, netColor);
 
   r.y = y - 22;
 }
