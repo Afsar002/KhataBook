@@ -29,6 +29,9 @@ import { Colors, MinTouchTarget, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { impact } from '@/utils/haptics';
 
+/** Debounce interval to prevent double-clicks (ms). */
+const CLICK_DEBOUNCE_MS = 300;
+
 export type ButtonVariant = 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
 export type ButtonSize = 'default' | 'sm' | 'lg' | 'icon';
 
@@ -147,11 +150,17 @@ export function Button({
   const theme = useTheme();
   const palette = variantPalette(variant, theme);
   const isLink = variant === 'link';
+  const lastPressRef = React.useRef<number>(0);
 
   const handlePress = () => {
     if (disabled) {
       return;
     }
+    const now = Date.now();
+    if (now - lastPressRef.current < CLICK_DEBOUNCE_MS) {
+      return;
+    }
+    lastPressRef.current = now;
     impact('light');
     onPress?.();
   };

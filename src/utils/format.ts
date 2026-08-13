@@ -139,67 +139,68 @@ export function parseISODate(iso: string): Date {
   return new Date(year, month - 1, day);
 }
 
-/** Format ISO date string (YYYY-MM-DD) to display format "DD MMM YYYY" (e.g., "04 Aug 2026"). */
+/** Format ISO date string (YYYY-MM-DD) to display format "DD/MM/YYYY" (e.g., "04/08/2026"). */
 export function formatISOToDisplay(iso: string): string {
   const d = parseISODate(iso);
   if (Number.isNaN(d.getTime())) {
     return iso || '—';
   }
-  return normalizeSpaces(d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }));
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
 }
 
-/** `YYYY-MM-DD` → "11 Aug" (day + short month, no year). */
+/** `YYYY-MM-DD` → "DD/MM/YYYY" (e.g., "04/08/2026"). */
 export function formatDayMonth(iso: string): string {
   const d = parseISODate(iso);
   if (Number.isNaN(d.getTime())) {
     return iso;
   }
-  return normalizeSpaces(d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }));
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
 }
 
-/** `YYYY-MM-DD` → "Sat, 01 Aug 26" (weekday, day, month, 2-digit year). */
+/** `YYYY-MM-DD` → "DD/MM/YYYY" (e.g., "04/08/2026"). */
 export function formatRangeDate(iso: string): string {
   const d = parseISODate(iso);
   if (Number.isNaN(d.getTime())) {
     return iso;
   }
-  return normalizeSpaces(
-    d.toLocaleDateString('en-IN', {
-      weekday: 'short',
-      day: '2-digit',
-      month: 'short',
-      year: '2-digit',
-    })
-  );
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
 }
 
-/** `YYYY-MM-DD` → "11 Aug 2026" (day, short month, full year). */
+/** `YYYY-MM-DD` → "DD/MM/YYYY" (e.g., "04/08/2026"). */
 export function formatLongDate(iso: string): string {
   const d = parseISODate(iso);
   if (Number.isNaN(d.getTime())) {
     return iso;
   }
-  return normalizeSpaces(
-    d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-  );
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
 }
 
-/** Format an ISO datetime to "04 Aug 2026, 4:30 PM" (report "generated" line). */
+/** Format an ISO datetime to "DD/MM/YYYY, 4:30 PM" (report "generated" line). */
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) {
     return iso;
   }
-  return normalizeSpaces(
-    d.toLocaleString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    })
-  );
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  const hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const period = hours < 12 ? 'AM' : 'PM';
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+  return `${day}/${month}/${year}, ${hour12}:${minutes} ${period}`;
 }
 
 /** Human label for a report's date range, e.g. "01 Aug 2026 – 07 Aug 2026". */

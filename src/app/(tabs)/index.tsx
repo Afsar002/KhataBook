@@ -95,9 +95,7 @@ export default function HistoryScreen() {
             withdraw={summary?.expense ?? 0}
             deposit={summary?.income ?? 0}
             cashInHand={summary?.cashInHand ?? 0}
-            dayBalance={(summary?.income ?? 0) - (summary?.expense ?? 0)}
             entries={entries}
-            balanceLabel="Today's Balance"
             showReportRow
             onOpenReport={() => router.push('/history-report')}
             onPressEntry={openEntry}
