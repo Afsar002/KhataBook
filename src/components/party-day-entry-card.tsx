@@ -14,7 +14,7 @@ import { Card } from '@/components/card';
 import { ThemedText } from '@/components/themed-text';
 import { InterFonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { formatINR, formatTimeOfDay } from '@/utils/format';
+import { formatINR, formatISOToDisplay, formatTimeOfDay } from '@/utils/format';
 
 type PartyDayEntryCardProps = {
   /** `HH:MM` (24-hour); '' for opening-balance entries. */
@@ -47,7 +47,7 @@ export function PartyDayEntryCard({
 }: PartyDayEntryCardProps) {
   const theme = useTheme();
   const timeLabel = formatTimeOfDay(time) || '—';
-  const dateLabel = date;
+  const dateLabel = formatISOToDisplay(date);
 
   const row = (
     <View style={styles.row}>
@@ -173,8 +173,11 @@ const styles = StyleSheet.create({
   divider: {
     borderLeftWidth: StyleSheet.hairlineWidth,
   },
+  // Date and time now use the same font weight/size for consistent appearance on same line
   time: {
-    fontFamily: InterFonts.semibold,
+    fontFamily: InterFonts.medium,
+    fontSize: 12,
+    color: 'rgb(14,15,14)',
   },
   timeWrap: {
     flexDirection: 'row',
@@ -189,7 +192,7 @@ const styles = StyleSheet.create({
   date: {
     fontFamily: InterFonts.medium,
     fontSize: 12,
-    color: '#6B7280',
+    color: 'rgb(14, 15, 14)',
     marginBottom: 1,
   },
   balancePill: {

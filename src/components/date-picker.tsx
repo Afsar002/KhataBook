@@ -1,5 +1,5 @@
 /** Date picker component with calendar picker + manual entry (auto-slash). */
-import { Calendar, X } from 'lucide-react-native';
+import { Calendar } from 'lucide-react-native';
 import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useState } from 'react';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -44,7 +44,7 @@ export function DatePicker({
   // Parse the current value for display
   const displayValue = formatISOToDisplay(value);
 
-  // Format manual input: auto-insert slashes (DD/MM/YYYY)
+  // Format manual input: auto-insert slashes (supports DDMMYY or DDMMYYYY)
   const formatManualInput = (text: string) => {
     const digits = text.replace(/\D/g, '').slice(0, 8);
     let formatted = '';
@@ -55,42 +55,49 @@ export function DatePicker({
     return formatted;
   };
 
+  // Parse formatted string (DD/MM/YY or DD/MM/YYYY) to ISO, return null if invalid
+  const parseFormattedToISO = (formatted: string): string | null => {
+    // Expect either DD/MM/YY (8 chars) or DD/MM/YYYY (10 chars)
+    if (formatted.length !== 8 && formatted.length !== 10) return null;
+    const day = parseInt(formatted.slice(0, 2), 10);
+    const month = parseInt(formatted.slice(3, 5), 10);
+    const yearStr = formatted.slice(6);
+    const year = parseInt(yearStr, 10);
+    // Convert 2-digit year to 4-digit (assume 1950-2049 range)
+    const fullYear = yearStr.length === 2 ? (year >= 50 ? 1900 + year : 2000 + year) : year;
+    if (day < 1 || day > 31 || month < 1 || month > 12 || fullYear < 1900 || fullYear > 2100) return null;
+    const testDate = new Date(fullYear, month - 1, day);
+    if (testDate.getDate() !== day || testDate.getMonth() !== month - 1 || testDate.getFullYear() !== fullYear) return null;
+    if (minDate) {
+      const min = parseISODate(minDate);
+      if (testDate < min) return null;
+    }
+    if (maxDate) {
+      const max = parseISODate(maxDate);
+      if (testDate > max) return null;
+    }
+    return `${fullYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  };
+
+  // Validate a complete formatted string, return ISO if valid, null otherwise
+  const validateManualInput = (formatted: string): string | null => {
+    return parseFormattedToISO(formatted);
+  };
+
   const handleManualChange = (text: string) => {
     const formatted = formatManualInput(text);
     setManualValue(formatted);
-    // If complete DD/MM/YYYY, parse and validate
-    if (formatted.length === 10) {
-      const day = parseInt(formatted.slice(0, 2), 10);
-      const month = parseInt(formatted.slice(3, 5), 10);
-      const year = parseInt(formatted.slice(6, 10), 10);
-      if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 1900 && year <= 2100) {
-        // Validate actual date
-        const testDate = new Date(year, month - 1, day);
-        if (testDate.getDate() === day && testDate.getMonth() === month - 1 && testDate.getFullYear() === year) {
-          // Check min/max
-          let valid = true;
-          if (minDate) {
-            const min = parseISODate(minDate);
-            if (testDate < min) valid = false;
-          }
-          if (maxDate) {
-            const max = parseISODate(maxDate);
-            if (testDate > max) valid = false;
-          }
-          if (valid) {
-            const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            onChange(iso);
-            setShowManual(false);
-            setManualValue('');
-          }
-        }
-      }
+    // If complete and valid, commit to parent immediately but keep manual mode open
+    // The onBlur will close it after parent re-renders
+    const iso = validateManualInput(formatted);
+    if (iso) {
+      onChange(iso);
+      setShowPicker(false);
     }
   };
 
-  const handleValueChange = (event: DateTimePickerChangeEvent, selectedDate: Date) => {
+  const handleValueChange = (_event: DateTimePickerChangeEvent, selectedDate: Date) => {
     setShowPicker(false);
-    // Use local date components to avoid timezone issues (toISOString returns UTC)
     const year = selectedDate.getFullYear();
     const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
     const day = String(selectedDate.getDate()).padStart(2, '0');
@@ -102,19 +109,29 @@ export function DatePicker({
     setShowPicker(false);
   };
 
-  const handleManualPress = () => {
+  // Clicking the date input opens manual entry mode - pre-fill with current date
+  const handleInputPress = () => {
     if (!disabled) {
       setShowManual(true);
+      setManualValue(displayValue);
+    }
+  };
+
+  // Clicking the calendar icon opens the native calendar picker
+  const handleCalendarPress = () => {
+    if (!disabled) {
+      setShowManual(false);
       setManualValue('');
+      setShowPicker(true);
     }
   };
 
   const handleManualBlur = () => {
-    // If incomplete, revert to display value
-    if (manualValue.length > 0 && manualValue.length < 10) {
-      setManualValue('');
-    }
+    // Always close manual mode on blur. The TextInput will show whatever manualValue
+    // was last set (valid commit or incomplete). Parent value prop may not have updated
+    // yet, but we don't revert here - the next render will pick up the new prop.
     setShowManual(false);
+    setManualValue('');
   };
 
   const parsedValue = parseISODate(value);
@@ -129,60 +146,51 @@ export function DatePicker({
         </ThemedText>
       )}
       <View style={styles.inputWrap}>
-        <Pressable
-          onPress={() => !disabled && setShowPicker(true)}
-          disabled={disabled}
-          accessibilityRole="button"
-          accessibilityLabel={accessibilityLabel}
-          style={[
-            styles.button,
-            { backgroundColor: disabled ? theme.backgroundElement : theme.card },
-            { borderColor: theme.border },
-          ]}
-        >
-          <View style={styles.buttonContent}>
-            <Calendar size={20} color={theme.textSecondary} style={styles.icon} />
+        {showManual ? (
+          <TextInput
+            value={manualValue}
+            onChangeText={handleManualChange}
+            onBlur={handleManualBlur}
+            placeholder="DD/MM/YYYY"
+            placeholderTextColor={theme.textSecondary}
+            keyboardType="number-pad"
+            maxLength={10}
+            style={[
+              styles.input,
+              { backgroundColor: disabled ? theme.backgroundElement : theme.card, borderColor: theme.border, color: theme.text },
+            ]}
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+          />
+        ) : (
+          <Pressable
+            onPress={handleInputPress}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={accessibilityLabel}
+            style={[
+              styles.input,
+              { backgroundColor: disabled ? theme.backgroundElement : theme.card },
+              { borderColor: theme.border },
+            ]}
+          >
             <ThemedText type="default" style={styles.dateText} numberOfLines={1}>
               {displayValue}
             </ThemedText>
-          </View>
-        </Pressable>
+          </Pressable>
+        )}
         <Pressable
-          onPress={handleManualPress}
+          onPress={handleCalendarPress}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Enter date manually"
-          style={styles.manualButton}
+          accessibilityLabel="Open calendar"
+          style={styles.calendarButton}
         >
-          {showManual ? (
-            <X size={20} color={theme.textSecondary} />
-          ) : (
-            <ThemedText type="small" themeColor="textSecondary" style={styles.manualHint}>
-              Type
-            </ThemedText>
-          )}
+          <Calendar size={20} color={theme.textSecondary} />
         </Pressable>
       </View>
-
-      {showManual && (
-        <TextInput
-          value={manualValue}
-          onChangeText={handleManualChange}
-          onBlur={handleManualBlur}
-          placeholder="DD/MM/YYYY"
-          placeholderTextColor={theme.textSecondary}
-          keyboardType="number-pad"
-          maxLength={10}
-          style={[
-            styles.manualInput,
-            { backgroundColor: theme.card, borderColor: theme.border, color: theme.text },
-          ]}
-          autoFocus
-          autoCapitalize="none"
-          autoCorrect={false}
-          spellCheck={false}
-        />
-      )}
 
       {showPicker && (
         <DateTimePicker
@@ -213,48 +221,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.one,
   },
-  button: {
+  input: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     borderWidth: 1,
     borderRadius: Radius.input,
     minHeight: 52,
     flex: 1,
-  },
-  buttonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    flex: 1,
-  },
-  icon: {
-    opacity: 0.7,
   },
   dateText: {
     flex: 1,
     fontFamily: 'Inter_500Medium',
   },
-  manualButton: {
+  calendarButton: {
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.two,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  manualHint: {
-    fontFamily: 'Inter_500Medium',
-  },
-  manualInput: {
-    flex: 1,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    borderWidth: 1,
-    borderRadius: Radius.input,
-    fontFamily: 'Inter_500Medium',
-    fontSize: 16,
-    minHeight: 52,
   },
   picker: {
     width: '100%',

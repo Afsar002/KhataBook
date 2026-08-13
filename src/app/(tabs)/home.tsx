@@ -219,7 +219,7 @@ export default function DashboardScreen() {
                 <DayEntryCard
                   key={item.id}
                   time={item.time}
-                  pill={item.categoryName ?? undefined}
+                  pill={item.note ?? item.categoryName ?? undefined}
                   withdraw={item.kind === "expense" ? item.amount : null}
                   deposit={item.kind === "income" ? item.amount : null}
                   hasAttachments={item.hasAttachments}

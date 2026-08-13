@@ -27,12 +27,8 @@ type DayLedgerViewProps = {
   deposit: number;
   /** Running balance up to and including this day (all accounts). */
   cashInHand: number;
-  /** This day's net balance (`income − expense`). */
-  dayBalance: number;
   /** Non-transfer ledger rows for the day. */
   entries: LedgerRow[];
-  /** Right-hand summary label: "Today's Balance" or "Day Balance". */
-  balanceLabel: string;
   /** When true, the summary card shows the "VIEW DEPOSIT & WITHDRAW REPORT" row. */
   showReportRow?: boolean;
   onOpenReport?: () => void;
@@ -48,9 +44,7 @@ export function DayLedgerView({
   withdraw,
   deposit,
   cashInHand,
-  dayBalance,
   entries,
-  balanceLabel,
   showReportRow = false,
   onOpenReport,
   onPressEntry,
@@ -69,17 +63,6 @@ export function DayLedgerView({
             </ThemedText>
             <ThemedText style={[styles.summaryAmount, { color: theme.income }]}>
               {formatINR(cashInHand)}
-            </ThemedText>
-          </View>
-          <View
-            style={[styles.summaryDivider, { backgroundColor: theme.border }]}
-          />
-          <View style={styles.summaryCell}>
-            <ThemedText type="small" themeColor="textSecondary">
-              {balanceLabel}
-            </ThemedText>
-            <ThemedText style={[styles.summaryAmount, { color: theme.income }]}>
-              {formatINR(dayBalance)}
             </ThemedText>
           </View>
         </View>

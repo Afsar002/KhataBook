@@ -93,9 +93,7 @@ export default function HistoryDayScreen() {
             withdraw={summary?.expense ?? 0}
             deposit={summary?.income ?? 0}
             cashInHand={summary?.cashInHand ?? 0}
-            dayBalance={(summary?.income ?? 0) - (summary?.expense ?? 0)}
             entries={entries}
-            balanceLabel="Day Balance"
             onPressEntry={openEntry}
             onWithdraw={() => router.push({ pathname: '/expense', params: { date } })}
             onDeposit={() => router.push({ pathname: '/income', params: { date } })}

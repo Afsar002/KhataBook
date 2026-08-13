@@ -4,9 +4,10 @@
  * Shows expression + live evaluated result + blinking cursor.
  * Integrates with CalculatorKeypad via onKeyPress.
  * Passes computed value to parent via onChangeAmount.
- * Keypad appears as a full-width bottom sheet covering 40% of the screen
+ * Keypad appears as a full-width bottom sheet covering 48% of the screen
  * height (like a native keyboard). It shows when the amount input is tapped
  * and dismisses when "=" is pressed or the user taps outside the keypad.
+ * Keypad layout: C × ÷ ⌫ / 7 8 9 - / 4 5 6 + / 1 2 3 + / 0 . =
  */
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, Modal, Pressable, StyleSheet, View } from 'react-native';
@@ -35,8 +36,8 @@ type CalculatorInputProps = {
 };
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-/** Keypad covers 40% of the screen height. */
-const KEYPAD_HEIGHT_RATIO = 0.4;
+/** Keypad covers 48% of the screen height (increased by 20%). */
+const KEYPAD_HEIGHT_RATIO = 0.48;
 
 export function CalculatorInput({
   initialValue = '',
@@ -112,10 +113,6 @@ export function CalculatorInput({
     switch (key) {
       case 'C':
         newExpression = '';
-        break;
-      case 'M+':
-      case 'M-':
-        // Memory keys - could be extended later
         break;
       case 'backspace':
         newExpression = expression.slice(0, -1);
