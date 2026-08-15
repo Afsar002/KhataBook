@@ -31,6 +31,14 @@ export {
 } from './prefs';
 export { initSyncNotifications } from './sync';
 export { notifyUpdateDownloaded, UpdateWatcher } from './update';
+export {
+  isAutoBackupEnabled,
+  setAutoBackupEnabled,
+  runDailyBackup,
+  registerDailyBackupTask,
+  unregisterDailyBackupTask,
+  isDailyBackupTaskRegistered,
+} from '@/services/backup/daily-backup';
 
 /**
  * Boot-time setup: foreground notification behaviour, Android channel, event

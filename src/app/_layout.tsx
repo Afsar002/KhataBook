@@ -32,7 +32,7 @@ import { SyncProvider } from '@/context/sync-context';
 import { ThemeProvider, useAppTheme } from '@/context/theme-context';
 import { initDatabase } from '@/db/database';
 import { registerRecurringTask } from '@/services/recurring/scheduler';
-import { initNotifications, UpdateWatcher } from '@/services/notifications';
+import { initNotifications, UpdateWatcher, registerDailyBackupTask } from '@/services/notifications';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -110,6 +110,8 @@ function DatabaseReadyGate({ children }: { children: ReactNode }) {
         // Local notifications: foreground handler, Android channel, sync-outcome
         // subscription and the recurring reminder re-arm. No-ops on web.
         void initNotifications();
+        // Register daily auto-backup background task (runs at ~12:00 AM daily)
+        void registerDailyBackupTask();
       })
       .catch((err) => {
         if (!mounted) {

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
 import { useRouter } from 'expo-router';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import {
   AlertTriangle,
@@ -22,6 +22,7 @@ import {
   Tags,
   Trash2,
   Upload,
+  FolderOpen,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
@@ -42,6 +43,10 @@ import { useAuth } from '@/context/auth-context';
 import { AVATAR_EMOJIS, useProfile } from '@/context/profile-context';
 import { useSync } from '@/context/sync-context';
 import { buildBackupJSON, parseBackup, restoreBackup } from '@/db/backup';
+import {
+  isAutoBackupEnabled,
+  setAutoBackupEnabled as setAutoBackupSetting,
+} from '@/services/backup/daily-backup';
 import { setSetting } from '@/db/settings';
 import { wipeDatabase } from '@/db/database';
 import { countUnresolvedConflicts } from '@/db/sync/conflict-repo';
@@ -57,6 +62,15 @@ import { impact } from '@/utils/haptics';
 import type { SyncDevice, SyncHistoryEntry, SyncStatus } from '@/types';
 import { todayISODate } from '@/utils/format';
 import { writeAndShareFile } from '@/utils/share';
+import { readFileFromDocuments } from '@/utils/file';
+
+interface AutoBackupFile {
+  name: string;
+  displayName: string;
+  date: string;
+  size: string;
+  uri: string;
+}
 
 /**
  * A single Cloud Sync status row: label on the left, value on the right. When
@@ -875,6 +889,8 @@ export default function SettingsScreen() {
   const { scheme, preference, setPreference } = useAppTheme();
   const [busy, setBusy] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(false);
+  const [autoBackupFiles, setAutoBackupFiles] = useState<AutoBackupFile[]>([]);
 
   const isDark = scheme === 'dark';
 
@@ -883,6 +899,88 @@ export default function SettingsScreen() {
     // default of dark also lands on light, which is expected behaviour.
     setPreference(value ? 'dark' : 'light');
   };
+
+  // Load auto-backup setting on mount
+  useEffect(() => {
+    let mounted = true;
+    void isAutoBackupEnabled().then((enabled) => {
+      if (mounted) {
+        setAutoBackupEnabled(enabled);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleAutoBackupToggle = async (value: boolean) => {
+    if (busy !== null) {
+      return;
+    }
+    setBusy('autobackup');
+    try {
+      await setAutoBackupSetting(value);
+      setAutoBackupEnabled(value);
+      feedback.toast({
+        message: value ? 'Automatic daily backup enabled' : 'Automatic daily backup disabled',
+        tone: value ? 'success' : 'info',
+      });
+    } catch (error) {
+      feedback.toast({ message: 'Could not update backup setting.', tone: 'error' });
+      console.error('[Settings] Auto backup toggle failed:', error);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Enumerates the auto-backup files saved in the Documents directory. */
+  const loadAutoBackupFiles = useCallback(async () => {
+    try {
+      // Paths.document is a Directory instance with a sync list() method in expo-file-system v2
+      // The list() returns (Directory | File)[]; we filter to only File instances (which have .extension)
+      const files = Paths.document.list();
+      const backups = files
+        .filter((f) => 'extension' in f && f.name?.startsWith('dailykhata-auto-backup-'))
+        .map((f) => {
+          const match = f.name?.match(/dailykhata-auto-backup-(.+)\.json/);
+          const dateStr = match?.[1] ?? '';
+          const sizeKB = f.size ? Math.max(1, Math.round(f.size / 1024)) : 0;
+          return {
+            name: f.name ?? '',
+            displayName: `Backup (${dateStr})`,
+            date: dateStr,
+            size: `${sizeKB} KB`,
+            uri: f.uri,
+          };
+        })
+        .sort((a, b) => b.date.localeCompare(a.date));
+      setAutoBackupFiles(backups);
+    } catch (error) {
+      console.error('[Settings] Failed to load auto-backup files:', error);
+    }
+  }, []);
+
+  /** Shares an auto-backup file via the system share sheet. */
+  const handleShareAutoBackup = (filename: string) => {
+    void runBusy(`share-${filename}`, async () => {
+      const json = await readFileFromDocuments(filename);
+      if (!json) {
+        return { title: 'Backup not found', message: 'The backup file could not be read.' };
+      }
+      await writeAndShareFile({
+        filename,
+        content: json,
+        mimeType: 'application/json',
+        dialogTitle: 'Share backup',
+      });
+      return null;
+    });
+  };
+
+  // Load auto-backup files on mount and after the toggle changes.
+  useEffect(() => {
+    void loadAutoBackupFiles();
+  }, [loadAutoBackupFiles, autoBackupEnabled]);
 
   /** Runs a data task with a shared busy state; reports the result in a branded dialog. */
   const runBusy = async (key: string, task: () => Promise<{ title: string; message: string } | null>) => {
@@ -1081,6 +1179,61 @@ export default function SettingsScreen() {
           </Card>
 
           <Card style={styles.dataCard}>
+            <View style={styles.row}>
+              <View style={styles.rowLabel}>
+                <ThemedText type="default">Automatic Daily Backup</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Create a backup at 12:00 AM and notify me
+                </ThemedText>
+              </View>
+              <Switch
+                value={autoBackupEnabled}
+                onValueChange={handleAutoBackupToggle}
+                disabled={busy !== null}
+                trackColor={{ true: theme.primary, false: theme.border }}
+                thumbColor="#FFFFFF"
+                accessibilityLabel="Automatic daily backup"
+              />
+            </View>
+          </Card>
+
+          <Card style={styles.dataCard}>
+            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.sectionHeader}>
+              Auto Backups
+            </ThemedText>
+            {autoBackupFiles.length === 0 ? (
+              <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+                No automatic backups yet. They will appear here after 12:00 AM.
+              </ThemedText>
+            ) : (
+              <View style={styles.backupList}>
+                {autoBackupFiles.map((file) => (
+                  <Pressable
+                    key={file.name}
+                    onPress={() => handleShareAutoBackup(file.name)}
+                    style={styles.backupRow}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Share ${file.name}`}
+                  >
+                    <View style={[styles.icon, { backgroundColor: theme.backgroundElement }]}>
+                      <FolderOpen size={22} color={theme.text} />
+                    </View>
+                    <View style={styles.backupInfo}>
+                      <ThemedText type="default">{file.displayName}</ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary">
+                        {file.date} · {file.size}
+                      </ThemedText>
+                    </View>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      Tap to share
+                    </ThemedText>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </Card>
+
+          <Card style={styles.dataCard}>
             <LargeButton
               title="Export Transactions"
               subtitle="Income & expense as Excel file"
@@ -1205,6 +1358,29 @@ const styles = StyleSheet.create({
   },
   dataCard: {
     gap: Spacing.two,
+  },
+  sectionHeader: {
+    marginBottom: Spacing.one,
+  },
+  emptyText: {
+    textAlign: 'center',
+    paddingVertical: Spacing.two,
+  },
+  backupList: {
+    gap: Spacing.two,
+  },
+  backupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.input,
+    backgroundColor: 'transparent',
+  },
+  backupInfo: {
+    flex: 1,
+    gap: 2,
   },
   advancedHeader: {
     flexDirection: 'row',
