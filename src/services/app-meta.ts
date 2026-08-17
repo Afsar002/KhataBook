@@ -30,11 +30,15 @@ export async function fetchAppMeta(
     return defaultMeta();
   }
   try {
+    // `.maybeSingle()` returns null (no error) when the row is missing,
+    // instead of PostgREST's "Cannot coerce the result to a single JSON
+    // object" error that `.single()` throws on zero rows. This happens when
+    // migration 003_app_meta.sql hasn't been applied to the live project yet.
     const { data, error } = await supabase
       .from('app_meta')
       .select('min_version, notice, migrate_from, migrate_notice')
       .eq('id', 1)
-      .single();
+      .maybeSingle();
     if (error) {
       console.warn('[app-meta] fetch failed:', error.message);
       return defaultMeta();

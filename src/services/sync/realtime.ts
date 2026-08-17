@@ -77,9 +77,15 @@ export function startRealtime(getClient: () => SupabaseClient | null = getSupaba
       return;
     }
     if (error) {
-      // Transient network issues are handled by the client's auto-reconnect;
-      // a failed subscribe just means we fall back to trigger-based sync.
+      // Dump the full error object — Supabase realtime errors carry a
+      // `code`/`reason` that the plain `.message` drops, which is exactly
+      // what you need to diagnose a "transport failure".
       console.warn('Realtime subscribe failed:', error.message);
+      console.warn(
+        'Realtime subscribe error (full):',
+        JSON.stringify(error, Object.getOwnPropertyNames(error), 2),
+      );
+      console.warn('Realtime endpoint:', supabase.realtime.endPoint);
     }
     // Not subscribed (TIMED_OUT / CHANNEL_ERROR / CLOSED) — back to polling.
     setMode('trigger');

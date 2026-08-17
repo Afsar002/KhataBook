@@ -57,6 +57,9 @@ export async function pushPendingChanges(
       continue; // parked; a manual Sync Now will retry
     }
 
+    // Scoped here so the catch block can log exactly what we tried to send.
+    let sentPayload: Record<string, unknown> | null = null;
+
     try {
       if (entry.operation === 'delete') {
         await deleteRemote(supabase, entry.tableName, entry.recordUuid);
@@ -68,13 +71,13 @@ export async function pushPendingChanges(
           await deleteRemote(supabase, entry.tableName, entry.recordUuid);
           result.deleted += 1;
         } else {
-          const payload = {
+          sentPayload = {
             ...row,
             user_id: userId,
           };
           const { error } = await supabase
             .from(entry.tableName)
-            .upsert(payload, { onConflict: 'id' });
+            .upsert(sentPayload, { onConflict: 'id' });
           if (error) {
             throw error;
           }
@@ -87,9 +90,57 @@ export async function pushPendingChanges(
         result.authError = true;
         return result; // stop — the session needs refreshing/re-auth
       }
-      // Log the actual error for debugging
+
+      const operation = entry.operation;
+      const table = entry.tableName;
+      const recordUuid = entry.recordUuid;
       const errMsg = error instanceof Error ? error.message : String(error);
-      console.error(`[Sync Push Failed] table=${entry.tableName} uuid=${entry.recordUuid} error=${errMsg}`);
+
+      // Supabase's PostgrestError carries structured fields (code/details/hint)
+      // that the plain message string drops. Dump ALL of them.
+      const supabaseErr = error as {
+        code?: string;
+        details?: string;
+        hint?: string;
+        message?: string;
+        status?: number;
+        statusText?: string;
+      };
+      const hasStructuredFields =
+        supabaseErr.code !== undefined ||
+        supabaseErr.details !== undefined ||
+        supabaseErr.hint !== undefined;
+
+      console.error(`[Sync Push Failed] table=${table} uuid=${recordUuid} operation=${operation}`);
+      console.error(
+        `[Sync Push Failed] Supabase error: ${
+          hasStructuredFields
+            ? JSON.stringify(
+                {
+                  code: supabaseErr.code,
+                  details: supabaseErr.details,
+                  hint: supabaseErr.hint,
+                  message: supabaseErr.message,
+                  status: supabaseErr.status,
+                  statusText: supabaseErr.statusText,
+                },
+                null,
+                2
+              )
+            : errMsg
+        }`
+      );
+      // The exact cloud-shaped payload that Supabase rejected.
+      console.error(
+        `[Sync Push Failed] Payload sent: ${JSON.stringify(sentPayload, null, 2)}`
+      );
+      // The JSON snapshot captured when the change was enqueued (diagnostics).
+      console.error(`[Sync Push Failed] Queued payload snapshot: ${entry.payload}`);
+      // Full raw error object (may include network/HTTP details on top of the above).
+      console.error(
+        `[Sync Push Failed] Full raw error: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`
+      );
+
       result.failed += 1;
       await markFailed(entry.id, entry.retryCount + 1);
     }

@@ -13,6 +13,7 @@ import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { WebSocketLikeConstructor } from '@supabase/realtime-js';
 
 import { isSyncConfigured, supabaseConfig } from './config';
 
@@ -38,6 +39,21 @@ export function getSupabaseClient(): SupabaseClient | null {
             // Native apps authenticate via OTP, not a URL redirect, so never
             // try to parse a session out of the navigation URL.
             detectSessionInUrl: false,
+          },
+          realtime: {
+            // React Native ships a global WebSocket, but the RealtimeClient's
+            // default VSN 2.0.0 serializer emits binary ArrayBuffer frames that
+            // Android's okhttp WebSocket mishandles — surfacing as
+            // "channel error: transport failure" even though REST works.
+            // Pinning VSN 1.0.0 forces the JSON serializer, which RN's
+            // WebSocket sends reliably.
+            vsn: '1.0.0',
+            // Bind the RN global WebSocket explicitly so the transport is
+            // never resolved from a stale/missing global at init time.
+            transport: WebSocket as unknown as WebSocketLikeConstructor,
+            params: {
+              eventsPerSecond: 2,
+            },
           },
         })
       : null;
