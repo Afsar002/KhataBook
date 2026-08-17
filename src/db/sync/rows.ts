@@ -9,7 +9,10 @@ import type { SQLiteBindValue, SQLiteDatabase } from 'expo-sqlite';
 import type { SyncTableSpec } from '@/db/sync/tables';
 
 function dataColumns(spec: SyncTableSpec): string[] {
-  return spec.table === 'settings' ? ['key', ...spec.columns] : spec.columns;
+  // For settings, spec.columns already includes both 'key' and 'value'
+  // (see SYNC_TABLES in tables.ts), so no prefix needed — prefixing would
+  // duplicate 'key' and break the INSERT/UPDATE with "duplicate column name".
+  return spec.columns;
 }
 
 /** Column values coerced to SQLite-safe types (dates from Postgres → ISO). */

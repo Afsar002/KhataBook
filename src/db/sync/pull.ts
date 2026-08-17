@@ -55,7 +55,9 @@ function toLocalRow(
     updated_at: remote.updated_at,
     deleted_at: remote.deleted_at ?? null,
     version: remote.version ?? 1,
-    created_at: remote.created_at ?? null,
+    // Local `settings` table has no `created_at` column (cloud does); only
+    // include it for tables that have the column otherwise the insert/update fails.
+    ...(spec.table !== 'settings' ? { created_at: remote.created_at ?? null } : {}),
   };
   for (const column of spec.columns) {
     const refTable = spec.fks[column];
