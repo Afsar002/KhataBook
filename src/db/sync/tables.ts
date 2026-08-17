@@ -37,7 +37,7 @@ export const SYNC_TABLES: SyncTableSpec[] = [
     columns: ['party_id', 'direction', 'amount', 'note', 'date', 'time', 'kind', 'attachments'],
     fks: { party_id: 'parties' },
   },
-  { table: 'settings', columns: ['value'], fks: {} },
+  { table: 'settings', columns: ['key', 'value'], fks: {} },
 ];
 
 /** Push order: parents before children so cloud FKs resolve. */
@@ -73,7 +73,8 @@ export async function readRowsForPush(
   const selectParts: string[] = [
     `${alias}.uuid AS id`,
     `${alias}.updated_at AS updated_at`,
-    `${alias}.created_at AS created_at`,
+    // settings table doesn't have created_at — only tables with created_at column get it
+    ...(spec.table !== 'settings' ? [`${alias}.created_at AS created_at`] : []),
     `${alias}.deleted_at AS deleted_at`,
     `${alias}.version AS version`,
   ];
@@ -83,7 +84,10 @@ export async function readRowsForPush(
     const refTable = spec.fks[column];
     if (refTable) {
       const refAlias = `r_${column}`;
-      selectParts.push(`COALESCE(${refAlias}.uuid, '') AS ${column}`);
+      // Use NULL for nullable FKs instead of empty string. LEFT JOIN returns NULL
+      // when the FK is null (e.g. transactions.category_id), and Supabase expects
+      // NULL (not '') for nullable uuid foreign keys.
+      selectParts.push(`${refAlias}.uuid AS ${column}`);
       joins.push(`LEFT JOIN ${refTable} ${refAlias} ON ${refAlias}.id = ${alias}.${column}`);
     } else {
       selectParts.push(`${alias}.${column} AS ${column}`);
