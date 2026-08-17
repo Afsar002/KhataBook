@@ -87,6 +87,9 @@ export async function pushPendingChanges(
         result.authError = true;
         return result; // stop — the session needs refreshing/re-auth
       }
+      // Log the actual error for debugging
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[Sync Push Failed] table=${entry.tableName} uuid=${entry.recordUuid} error=${errMsg}`);
       result.failed += 1;
       await markFailed(entry.id, entry.retryCount + 1);
     }

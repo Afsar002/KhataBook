@@ -283,6 +283,8 @@ async function runSync(
     }
     return lastResult;
   } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[Sync Engine Error] source=${source} error=${errMsg}`);
     setStatus('error');
     if (source === 'auto' && (await getAutoSync())) {
       scheduleRetry();

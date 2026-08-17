@@ -97,6 +97,8 @@ async function fetchRemote(
   }
   const { data, error } = await query;
   if (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[Sync Pull Fetch Failed] table=${table} error=${errMsg}`);
     throw error;
   }
   return (data ?? []) as Record<string, unknown>[];
