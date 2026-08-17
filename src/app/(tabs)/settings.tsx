@@ -1195,6 +1195,9 @@ export default function SettingsScreen() {
                 accessibilityLabel="Automatic daily backup"
               />
             </View>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.backupPath}>
+              Saved to: {Paths.document.uri}
+            </ThemedText>
           </Card>
 
           <Card style={styles.dataCard}>
@@ -1429,6 +1432,10 @@ const styles = StyleSheet.create({
   },
   savedLine: {
     textAlign: 'center',
+  },
+  backupPath: {
+    marginTop: Spacing.one,
+    opacity: 0.6,
   },
   deviceField: {
     marginTop: Spacing.one,
