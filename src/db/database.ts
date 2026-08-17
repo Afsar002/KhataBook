@@ -212,13 +212,15 @@ const SCHEMA_TABLES = `
   );
 
   CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    uuid TEXT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT NOT NULL UNIQUE,
     user_id TEXT,
-    updated_at TEXT,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     deleted_at TEXT,
-    version INTEGER NOT NULL DEFAULT 1
+    version INTEGER NOT NULL DEFAULT 1,
+    UNIQUE (user_id, key)
   );
 
   -- Local sync queue: one row per pending change, coalesced by (table, uuid).
@@ -400,6 +402,9 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
     }
     if (current < 12) {
       await migrateV12(database);
+    }
+    if (current < 13) {
+      await migrateV13(database);
     }
   });
 }
@@ -841,6 +846,98 @@ async function migrateV12(database: SQLite.SQLiteDatabase): Promise<void> {
     }
   }
   await database.runAsync('PRAGMA user_version = 12');
+}
+
+/**
+ * v13 (2026-08-17): Fix settings table schema to match cloud (Supabase).
+ *
+ * Cloud schema (001_initial.sql):
+ *   CREATE TABLE settings (
+ *     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ *     user_id uuid NOT NULL,
+ *     key text NOT NULL,
+ *     value text NOT NULL,
+ *     updated_at timestamptz NOT NULL DEFAULT now(),
+ *     deleted_at timestamptz,
+ *     version integer NOT NULL DEFAULT 1,
+ *     UNIQUE (user_id, key)
+ *   );
+ *
+ * Local schema before v13:
+ *   CREATE TABLE settings (
+ *     key TEXT PRIMARY KEY,          -- local PK was 'key'
+ *     value TEXT NOT NULL,
+ *     uuid TEXT,                     -- nullable, not unique
+ *     user_id TEXT,
+ *     updated_at TEXT,
+ *     deleted_at TEXT,
+ *     version INTEGER NOT NULL DEFAULT 1
+ *   );
+ *
+ * Problem: push.ts reads `uuid AS id` for upsert; if uuid is NULL (common
+ * for pre-sync rows), the upsert payload has `id: null` → RLS with check
+ * fails or duplicate NULL ids are created. Sync fails with status 'error'.
+ *
+ * Fix: Recreate settings table with proper local PK (id AUTOINCREMENT)
+ * and uuid NOT NULL UNIQUE. Backfill UUIDs for existing rows.
+ */
+async function migrateV13(database: SQLite.SQLiteDatabase): Promise<void> {
+  // Check if migration already applied (fresh install gets correct schema from SCHEMA_TABLES)
+  const columns = await database.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(settings)'
+  );
+  const hasIdColumn = columns.some((col) => col.name === 'id');
+  if (hasIdColumn) {
+    await database.runAsync('PRAGMA user_version = 13');
+    return;
+  }
+
+  // No nested transaction — migrate() wraps in one.
+  await database.execAsync('PRAGMA foreign_keys = OFF');
+
+  // 1. Rename old table
+  await database.execAsync('ALTER TABLE settings RENAME TO settings_old');
+
+  // 2. Create new settings table matching cloud schema pattern
+  await database.execAsync(`
+    CREATE TABLE settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT NOT NULL UNIQUE,
+      user_id TEXT,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
+      version INTEGER NOT NULL DEFAULT 1,
+      UNIQUE (user_id, key)
+    );
+  `);
+
+  // 3. Migrate data: generate UUID for rows missing one
+  await database.execAsync(`
+    INSERT INTO settings (uuid, user_id, key, value, updated_at, deleted_at, version)
+    SELECT
+      COALESCE(uuid, ${RANDOM_UUID_SQL}) AS uuid,
+      user_id,
+      key,
+      value,
+      COALESCE(updated_at, datetime('now')) AS updated_at,
+      deleted_at,
+      COALESCE(version, 1) AS version
+    FROM settings_old
+  `);
+
+  // 4. Drop old table
+  await database.execAsync('DROP TABLE settings_old');
+
+  // 5. Recreate the uuid index (will be created by SCHEMA_INDEXES after migrate())
+  //    but ensure it exists now for any immediate operations.
+  await database.execAsync(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_uuid ON settings (uuid);'
+  );
+
+  await database.execAsync('PRAGMA foreign_keys = ON');
+  await database.runAsync('PRAGMA user_version = 13');
 }
 
 export async function initDatabase(): Promise<void> {

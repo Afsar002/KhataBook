@@ -17,25 +17,26 @@ export async function setSetting(key: string, value: string): Promise<void> {
   const db = getDatabase();
   const now = nowIso();
   await db.withTransactionAsync(async () => {
-    const existing = await db.getFirstAsync<{ uuid: string | null }>(
-      'SELECT uuid FROM settings WHERE key = ?',
+    const existing = await db.getFirstAsync<{ uuid: string | null; id: number }>(
+      'SELECT id, uuid FROM settings WHERE key = ?',
       key
     );
-    if (existing?.uuid) {
+    if (existing) {
+      // Update by primary key (id) since key is unique
       await db.runAsync(
-        'UPDATE settings SET value = ?, updated_at = ? WHERE key = ?',
+        'UPDATE settings SET value = ?, updated_at = ? WHERE id = ?',
         value,
         now,
-        key
+        existing.id
       );
       await enqueueChange(db, {
         table: 'settings',
         operation: 'update',
-        recordUuid: existing.uuid,
+        recordUuid: existing.uuid ?? uuid(), // fallback generates new uuid if somehow missing
         payload: { value },
       });
     } else {
-      // INSERT OR REPLACE would reset the uuid on every write; insert only on first.
+      // Insert new setting with generated uuid
       const recordUuid = uuid();
       await db.runAsync(
         'INSERT INTO settings (uuid, user_id, updated_at, key, value) VALUES (?, ?, ?, ?, ?)',
