@@ -8,7 +8,7 @@ import { useAuth } from '@/context/auth-context';
 import { useTheme } from '@/hooks/use-theme';
 
 export function SyncStatusBanner() {
-  const { status, realtimeMode, runNow } = useSync();
+  const { status, realtimeMode, runNow, lastResult } = useSync();
   const { account } = useAuth();
   const theme = useTheme();
 
@@ -43,7 +43,9 @@ export function SyncStatusBanner() {
           bgColor: theme.expenseSoft,
           iconColor: theme.expense,
           label: 'Sync failed',
-          message: 'Tap to retry',
+          message: lastResult
+            ? `Pushed: ${lastResult.pushed}, Pulled: ${lastResult.pulled}, Failed: ${lastResult.failed}`
+            : 'Tap to retry',
           action: { label: 'Retry', onPress: runNow },
         };
       case 'version_blocked':
@@ -99,9 +101,9 @@ export function SyncStatusBanner() {
   const config = getBannerConfig();
   const Icon = config.icon;
 
-  // Only show banner for non-idle states, or always show for debugging
-  // For production, we can show a subtle indicator for idle too
-  const showBanner = status !== 'idle' || true; // Always show for now
+  // Only show banner for non-idle states (offline, syncing, error, version_blocked)
+  // Hide when idle (synced) for a cleaner UI
+  const showBanner = status !== 'idle';
 
   if (!showBanner) {
     return null;
