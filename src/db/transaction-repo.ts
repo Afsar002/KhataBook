@@ -641,6 +641,39 @@ export async function getRunningBalance(date: string): Promise<number> {
 }
 
 /**
+ * Attaches a per-entry running balance (cash in hand) to a day's ledger rows.
+ *
+ * `listLedgerRange` returns the day's rows newest-first (date DESC, id DESC);
+ * this re-derives the balance forward from the day's start so the last row's
+ * running balance equals the day's closing `cashInHand` shown in the header.
+ * Transfers never change total cash in hand (money stays in the book), so only
+ * income/expense rows move the balance — matching `getRunningBalance`. Rows
+ * are mutated in place and the same array is returned.
+ */
+export async function withDayRunningBalance(
+  date: string,
+  entries: LedgerRow[]
+): Promise<LedgerRow[]> {
+  if (entries.length === 0) {
+    return entries;
+  }
+  const dayNet = await getDaySummary(date);
+  const inclusiveBalance = await getRunningBalance(date);
+  // Balance strictly before this day, then walk the day's rows chronologically.
+  let running = inclusiveBalance - (dayNet.income - dayNet.expense);
+  const chronological = [...entries].reverse();
+  for (const row of chronological) {
+    if (row.kind === 'income') {
+      running += row.amount;
+    } else if (row.kind === 'expense') {
+      running -= row.amount;
+    }
+    row.runningBalance = running;
+  }
+  return entries;
+}
+
+/**
  * Summary row for a single day, always present. A day with no entries returns
  * no row from `listDaySummaries`; this synthesizes one with the day's running
  * balance so Cash in Hand never shows ₹0 (the true balance still exists — it

@@ -199,6 +199,8 @@ export interface LedgerRow {
   entryKind: LedgerEntryKind;
   /** True when the entry has attachment(s) — shows the paperclip indicator. */
   hasAttachments?: boolean;
+  /** Running balance (cash in hand) after this entry — set by `withDayRunningBalance`. */
+  runningBalance?: number;
 }
 
 export interface DaySummary {

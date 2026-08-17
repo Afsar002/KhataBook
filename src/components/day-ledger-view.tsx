@@ -122,6 +122,7 @@ export function DayLedgerView({
             pill={item.note ?? item.categoryName ?? undefined}
             withdraw={item.kind === "expense" ? item.amount : null}
             deposit={item.kind === "income" ? item.amount : null}
+            runningBalance={item.runningBalance}
             hasAttachments={item.hasAttachments}
             onPress={
               onPressEntry && item.entryKind !== "opening"

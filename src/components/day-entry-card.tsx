@@ -20,6 +20,8 @@ type DayEntryCardProps = {
   withdraw: number | null;
   /** Green amount shown in the right cell; null hides the cell. */
   deposit: number | null;
+  /** Running balance (cash in hand) after this entry — shown in a green pill. */
+  runningBalance?: number;
   /** True when the entry has attachment(s) — shows a paperclip. */
   hasAttachments?: boolean;
   /** When omitted the card is not tappable (opening-balance entries). */
@@ -31,6 +33,7 @@ export function DayEntryCard({
   pill,
   withdraw,
   deposit,
+  runningBalance,
   hasAttachments,
   onPress,
 }: DayEntryCardProps) {
@@ -52,6 +55,13 @@ export function DayEntryCard({
           <View style={[styles.pill, { backgroundColor: theme.backgroundElement }]}>
             <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.pillText}>
               {pill}
+            </ThemedText>
+          </View>
+        ) : null}
+        {runningBalance != null ? (
+          <View style={[styles.balancePill, { backgroundColor: theme.incomeSoft }]}>
+            <ThemedText type="smallBold" style={[styles.balanceText, { color: theme.income }]}>
+              {formatINR(runningBalance)}
             </ThemedText>
           </View>
         ) : null}
@@ -169,6 +179,16 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontFamily: InterFonts.medium,
     maxWidth: 140,
+  },
+  balancePill: {
+    borderRadius: 8,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.half,
+    alignItems: 'flex-start',
+  },
+  balanceText: {
+    fontSize: 11,
+    lineHeight: 14,
   },
   amount: {
     fontFamily: InterFonts.semibold,

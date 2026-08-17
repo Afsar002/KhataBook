@@ -17,6 +17,7 @@ import {
   editRouteForLedgerRow,
   getDayLedgerSummary,
   listLedgerRange,
+  withDayRunningBalance,
   type DayLedgerSummary,
 } from '@/db/transaction-repo';
 import { useResponsiveLayout } from '@/hooks/use-responsive';
@@ -45,7 +46,8 @@ export default function HistoryDayScreen() {
           return;
         }
         setSummary(summary);
-        setEntries(rows.filter((row) => row.kind !== 'transfer'));
+        const dayRows = rows.filter((row) => row.kind !== 'transfer');
+        setEntries(await withDayRunningBalance(date, dayRows));
         setLoading(false);
       })();
       return () => {
