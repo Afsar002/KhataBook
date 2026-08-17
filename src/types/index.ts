@@ -237,6 +237,30 @@ export interface CashBook {
   actual: number;
 }
 
+/**
+ * Detailed cash book entry with running balance (for ledger view).
+ */
+export interface CashBookEntry {
+  /** Entry ID (0 = opening balance). */
+  id: number;
+  /** Date (`YYYY-MM-DD`). */
+  date: string;
+  /** Time (`HH:MM`). */
+  time: string;
+  /** Entry type. */
+  type: 'income' | 'expense' | 'transfer_in' | 'transfer_out' | 'opening';
+  /** Amount. */
+  amount: number;
+  /** Note / narration. */
+  note: string | null;
+  /** Category name (for income/expense). */
+  category: string | null;
+  /** Account name (for transfers). */
+  account: string | null;
+  /** Running balance after this entry. */
+  runningBalance: number;
+}
+
 /** Money given on credit / received in a period (khata flows). */
 export interface PartyTotals {
   /** Σ of 'out' party transactions (money given). */

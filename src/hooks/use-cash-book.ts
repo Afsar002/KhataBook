@@ -4,18 +4,24 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   clearCashCount,
   getCashBook,
+  getCashBookEntries,
   setCashCount,
 } from '@/db/cash-book-repo';
-import type { CashBook } from '@/types';
+import type { CashBook, CashBookEntry } from '@/types';
 
 export function useCashBook(date: string) {
   const [book, setBook] = useState<CashBook | null>(null);
+  const [entries, setEntries] = useState<CashBookEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const next = await getCashBook(date);
-    setBook(next);
+    const [nextBook, nextEntries] = await Promise.all([
+      getCashBook(date),
+      getCashBookEntries(date),
+    ]);
+    setBook(nextBook);
+    setEntries(nextEntries);
     setLoading(false);
   }, [date]);
 
@@ -36,5 +42,5 @@ export function useCashBook(date: string) {
     await refresh();
   }, [date, refresh]);
 
-  return { book, loading, refresh, saveCount, clearCount };
+  return { book, entries, loading, refresh, saveCount, clearCount };
 }

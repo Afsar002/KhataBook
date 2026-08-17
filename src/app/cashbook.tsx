@@ -8,11 +8,12 @@
  */
 import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Scale } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, SectionList, StyleSheet, View } from 'react-native';
 
 import { AmountInput } from '@/components/amount-input';
 import { Card } from '@/components/card';
 import { LargeButton } from '@/components/large-button';
+import { PartyDayEntryCard } from '@/components/party-day-entry-card';
 import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
@@ -20,12 +21,13 @@ import { Spacing } from '@/constants/theme';
 import { useCashBook } from '@/hooks/use-cash-book';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDateLabel, formatINR, shiftISODate, todayISODate } from '@/utils/format';
+import type { CashBookEntry } from '@/types';
 
 export default function CashBookScreen() {
   const theme = useTheme();
   const today = todayISODate();
   const [date, setDate] = useState(today);
-  const { book, loading, saveCount, clearCount } = useCashBook(date);
+  const { book, entries, loading, saveCount, clearCount } = useCashBook(date);
   const [actual, setActual] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -170,6 +172,47 @@ export default function CashBookScreen() {
         ) : null}
       </Card>
 
+      {loading ? null : (
+        <View style={styles.ledgerSection}>
+          <ThemedText type="smallBold" style={styles.ledgerHeader}>
+            Day&apos;s Entries
+          </ThemedText>
+          {entries.length === 0 ? (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.emptyLedger}>
+              No cash entries for this day.
+            </ThemedText>
+          ) : (
+            <SectionList
+              sections={[{ title: date, data: entries }]}
+              renderItem={({ item }: { item: CashBookEntry }) => {
+                const isIncome = item.type === 'income';
+                const isTransferIn = item.type === 'transfer_in';
+                const isExpense = item.type === 'expense';
+                const isTransferOut = item.type === 'transfer_out';
+                const isOpening = item.type === 'opening';
+
+                const give = (isExpense || isTransferOut) && !isOpening ? item.amount : null;
+                const receive = (isIncome || isTransferIn) && !isOpening ? item.amount : null;
+
+                return (
+                  <PartyDayEntryCard
+                    time={item.time}
+                    date={item.date}
+                    note={item.note ?? ''}
+                    give={give}
+                    receive={receive}
+                    runningBalance={item.runningBalance}
+                  />
+                );
+              }}
+              keyExtractor={(item) => String(item.id)}
+              stickySectionHeadersEnabled={false}
+              contentContainerStyle={styles.ledgerList}
+            />
+          )}
+        </View>
+      )}
+
       <View style={styles.hint}>
         <CalendarDays size={14} color={theme.textSecondary} />
         <ThemedText type="small" themeColor="textSecondary">
@@ -286,5 +329,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.one,
+  },
+  ledgerSection: {
+    marginTop: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    gap: Spacing.two,
+  },
+  ledgerHeader: {
+    color: 'rgb(14,15,14)',
+    marginBottom: Spacing.half,
+  },
+  emptyLedger: {
+    textAlign: 'center',
+    paddingVertical: Spacing.four,
+  },
+  ledgerList: {
+    paddingBottom: Spacing.four,
   },
 });
