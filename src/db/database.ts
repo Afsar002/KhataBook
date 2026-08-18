@@ -987,12 +987,15 @@ async function migrateV14(database: SQLite.SQLiteDatabase): Promise<void> {
     );
   `);
 
-  // 3. Migrate data: backfill created_at from updated_at, ensure user_id not null
+  // 3. Migrate data: preserve ALL rows, deduplicate by (user_id, key) keeping latest updated_at.
+  //    Old table had key as PK (one row per key), but could have duplicates across user_ids.
+  //    New table enforces UNIQUE (user_id, key) — we keep the most recent per user+key.
+  //    For rows with NULL user_id, assign a placeholder to avoid collapsing them together.
   await database.execAsync(`
     INSERT INTO settings (uuid, user_id, created_at, updated_at, deleted_at, version, key, value)
     SELECT
       uuid,
-      COALESCE(user_id, '') AS user_id,
+      COALESCE(NULLIF(user_id, ''), '__legacy_' || abs(random())) AS user_id,
       COALESCE(updated_at, datetime('now')) AS created_at,
       updated_at,
       deleted_at,
@@ -1000,6 +1003,7 @@ async function migrateV14(database: SQLite.SQLiteDatabase): Promise<void> {
       key,
       value
     FROM settings_old
+    WHERE uuid IS NOT NULL
   `);
 
   // 4. Drop old table

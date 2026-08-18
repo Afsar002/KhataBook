@@ -125,6 +125,13 @@ export function CalculatorInput({
         }
         hideKeypad();
         return;
+      case 'submit': // Internal: submit without hiding (for backdrop tap)
+        if (hasValidResult) {
+          const formatted = formatResult(liveResult);
+          setExpression(formatted);
+          onChangeAmount?.(liveResult);
+        }
+        return;
       default:
         // Numbers, operators, decimal
         if (disabled) return;
@@ -217,11 +224,15 @@ export function CalculatorInput({
         onRequestClose={hideKeypad}
       >
         <View style={styles.modalRoot}>
-          {/* Backdrop — tap outside the keypad to dismiss */}
+          {/* Backdrop — tap outside the keypad submits the amount (like "="),
+              then hides the keypad. */}
           <Pressable
             style={styles.backdrop}
-            onPress={hideKeypad}
-            accessibilityLabel="Close keypad"
+            onPress={() => {
+              handleKeyPress('submit');
+              hideKeypad();
+            }}
+            accessibilityLabel="Close keypad and submit amount"
             hitSlop={{ top: 0, left: 0, right: 0, bottom: 0 }}
           />
           {/* Keypad sheet — full width, 40% of screen height */}
