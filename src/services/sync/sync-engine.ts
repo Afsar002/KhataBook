@@ -356,6 +356,7 @@ export async function onAuthChanged(getClient: () => SupabaseClient | null = get
   }
   await setMeta(CURRENT_USER_KEY, session.user.id);
   // Listen for changes made on other devices while signed in.
+  await stopRealtime();
   startRealtime();
   // A fresh login downloads the user's data (automatic restore).
   await syncNow(getClient);
