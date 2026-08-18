@@ -31,6 +31,7 @@ import {
 } from '@/db/sync/meta';
 import { pullRemoteChanges } from '@/db/sync/pull';
 import { pushPendingChanges } from '@/db/sync/push';
+import { addSyncEvent } from '@/db/sync/history-repo';
 import { fetchAppMeta, versionSatisfies } from '@/services/app-meta';
 import { getDeviceName } from '@/services/device/device-name';
 import { getCurrentSession } from '@/services/supabase/auth';
@@ -259,6 +260,11 @@ async function runSync(
       failed: pushResult.failed,
       conflicts: pullResult.conflicts ?? 0,
     };
+    // Record successful sync run in history (info event) so user sees activity.
+    const totalChanges = pushResult.pushed + pushResult.deleted + pullResult.inserted + pullResult.updated;
+    if (totalChanges > 0) {
+      await addSyncEvent('info', `Synced ${totalChanges} change${totalChanges === 1 ? '' : 's'} (pushed ${pushResult.pushed}, pulled ${pullResult.inserted + pullResult.updated}).`);
+    }
     // Let listeners (e.g. sync-outcome notifications) react to the finished run.
     emitSyncResult(lastResult);
 
