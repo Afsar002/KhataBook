@@ -95,11 +95,20 @@ export function startRealtime(getClient: () => SupabaseClient | null = getSupaba
 /** Stops listening and releases the channel. Safe to call multiple times. */
 export async function stopRealtime(getClient: () => SupabaseClient | null = getSupabaseClient): Promise<void> {
   const supabase = getClient();
-  if (supabase && channel) {
+  const current = channel;
+  if (supabase && current) {
     // Await removal so the channel is fully gone before we allow a new one.
     // This prevents "cannot add callbacks after subscribe()" on rapid auth changes.
-    await supabase.removeChannel(channel);
+    // If removal fails, we still null the ref to avoid a stuck stale channel.
+    try {
+      await supabase.removeChannel(current);
+    } catch (err) {
+      console.warn('Realtime channel removal failed:', err);
+    }
   }
-  channel = null;
-  setMode('off');
+  // Only clear if it's still the same channel (avoids clobbering a new startRealtime)
+  if (channel === current) {
+    channel = null;
+    setMode('off');
+  }
 }

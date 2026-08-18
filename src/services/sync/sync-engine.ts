@@ -68,6 +68,8 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let periodicTimer: ReturnType<typeof setInterval> | null = null;
 let retryAttempts = 0;
 let lastResult: SyncSummary | null = null;
+/** Serializes overlapping auth transitions so sign-in/out don't interleave. */
+let authTransition: Promise<void> = Promise.resolve();
 
 const listeners: SyncStatusListener[] = [];
 
@@ -334,32 +336,43 @@ export async function armPeriodicSync(): Promise<void> {
   }, minutes * 60_000);
 }
 
-/** Called on sign-in / sign-out so the status reflects the session again. */
+/** Called on sign-in / sign-out so the status reflects the session again.
+ *  Serializes overlapping calls (e.g. boot restore + onAuthStateChange) so
+ *  transitions don't interleave and leave realtime in a bad state. */
 export async function onAuthChanged(getClient: () => SupabaseClient | null = getSupabaseClient): Promise<void> {
-  clearDebounce();
-  clearRetry();
-  if (!isSyncConfigured()) {
-    setStatus('unconfigured');
-    return;
+  // Queue this transition after any in-flight one.
+  const previous = authTransition;
+  let resolveNext: () => void;
+  authTransition = new Promise((resolve) => { resolveNext = resolve; });
+  await previous;
+  try {
+    clearDebounce();
+    clearRetry();
+    if (!isSyncConfigured()) {
+      setStatus('unconfigured');
+      return;
+    }
+    const session = getCurrentSession();
+    if (!session?.user.id) {
+      await stopRealtime();
+      setStatus('idle');
+      return;
+    }
+    // If a different account signs in on this device, drop the previous
+    // user's queued ops so they are never uploaded under the new user.
+    const previousUser = await getMeta(CURRENT_USER_KEY);
+    if (previousUser && previousUser !== session.user.id) {
+      await clearQueue();
+    }
+    await setMeta(CURRENT_USER_KEY, session.user.id);
+    // Listen for changes made on other devices while signed in.
+    await stopRealtime();
+    startRealtime();
+    // A fresh login downloads the user's data (automatic restore).
+    await syncNow(getClient);
+  } finally {
+    resolveNext!();
   }
-  const session = getCurrentSession();
-  if (!session?.user.id) {
-    stopRealtime();
-    setStatus('idle');
-    return;
-  }
-  // If a different account signs in on this device, drop the previous
-  // user's queued ops so they are never uploaded under the new user.
-  const previousUser = await getMeta(CURRENT_USER_KEY);
-  if (previousUser && previousUser !== session.user.id) {
-    await clearQueue();
-  }
-  await setMeta(CURRENT_USER_KEY, session.user.id);
-  // Listen for changes made on other devices while signed in.
-  await stopRealtime();
-  startRealtime();
-  // A fresh login downloads the user's data (automatic restore).
-  await syncNow(getClient);
 }
 
 /** Number of local operations waiting to upload (for status badges). */
