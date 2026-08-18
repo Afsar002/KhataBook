@@ -126,6 +126,7 @@ export function CalculatorInput({
         hideKeypad();
         return;
       case 'submit': // Internal: submit without hiding (for backdrop tap)
+        if (disabled) return;
         if (hasValidResult) {
           const formatted = formatResult(liveResult);
           setExpression(formatted);
@@ -207,7 +208,13 @@ export function CalculatorInput({
           )}
 
           {!hasValidResult && expression && (
-            <ThemedText type="small" themeColor="expense" style={styles.resultText} numberOfLines={1}>
+            <ThemedText
+              type="small"
+              themeColor="expense"
+              style={styles.resultText}
+              numberOfLines={1}
+              accessibilityLabel="Invalid expression, cannot calculate"
+            >
               Invalid expression
             </ThemedText>
           )}
