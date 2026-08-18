@@ -58,13 +58,26 @@ export function onRealtimeModeChange(listener: (mode: RealtimeMode) => void): ()
 }
 
 /** Starts listening for cloud changes. No-op when unconfigured or already running. */
-export function startRealtime(getClient: () => SupabaseClient | null = getSupabaseClient): void {
+export async function startRealtime(getClient: () => SupabaseClient | null = getSupabaseClient): Promise<void> {
   const supabase = getClient();
   if (!supabase || channel) {
     return;
   }
   // Assume trigger-based until the channel confirms SUBSCRIBED.
   setMode('trigger');
+  // Guard: if a channel with our name already exists (e.g. from a previous
+  // session that didn't clean up), remove it first. Calling .on() on an
+  // already-subscribed channel throws "cannot add postgres_changes callbacks
+  // after subscribe()". supabase.channel() returns the EXISTING channel when
+  // called with a duplicate name while it's still subscribed.
+  const existing = supabase.getChannels().find((c) => c.topic === `realtime:${CHANNEL_NAME}`);
+  if (existing) {
+    try {
+      await supabase.removeChannel(existing);
+    } catch (err) {
+      console.warn('Realtime: removed stale channel before restart:', err);
+    }
+  }
   channel = supabase.channel(CHANNEL_NAME);
   for (const spec of SYNC_TABLES) {
     channel.on('postgres_changes', { event: '*', schema: 'public', table: spec.table }, () => {
