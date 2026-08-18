@@ -214,12 +214,13 @@ const SCHEMA_TABLES = `
   CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     uuid TEXT NOT NULL UNIQUE,
-    user_id TEXT,
-    key TEXT NOT NULL,
-    value TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     deleted_at TEXT,
     version INTEGER NOT NULL DEFAULT 1,
+    key TEXT NOT NULL,
+    value TEXT,
     UNIQUE (user_id, key)
   );
 
@@ -405,6 +406,9 @@ async function migrate(database: SQLite.SQLiteDatabase): Promise<void> {
     }
     if (current < 13) {
       await migrateV13(database);
+    }
+    if (current < 14) {
+      await migrateV14(database);
     }
   });
 }
@@ -938,6 +942,76 @@ async function migrateV13(database: SQLite.SQLiteDatabase): Promise<void> {
 
   await database.execAsync('PRAGMA foreign_keys = ON');
   await database.runAsync('PRAGMA user_version = 13');
+}
+
+/**
+ * v14 (2026-08-18): Add `created_at` to local settings table to match cloud schema.
+ *
+ * Cloud schema (001_initial.sql) has `created_at` on settings but local never got it.
+ * Also align `user_id` to NOT NULL (cloud requires it for RLS) and `value` to nullable
+ * (cloud allows NULL) for full parity.
+ *
+ * This is a table rebuild since SQLite can't add NOT NULL columns without defaults
+ * to existing tables, and we need to change the nullability of existing columns.
+ */
+async function migrateV14(database: SQLite.SQLiteDatabase): Promise<void> {
+  // Check if migration already applied (fresh install gets correct schema from SCHEMA_TABLES)
+  const columns = await database.getAllAsync<{ name: string; notnull: number }>(
+    'PRAGMA table_info(settings)'
+  );
+  const hasCreatedAt = columns.some((col) => col.name === 'created_at');
+  if (hasCreatedAt) {
+    await database.runAsync('PRAGMA user_version = 14');
+    return;
+  }
+
+  // No nested transaction — migrate() wraps in one.
+  await database.execAsync('PRAGMA foreign_keys = OFF');
+
+  // 1. Rename old table
+  await database.execAsync('ALTER TABLE settings RENAME TO settings_old');
+
+  // 2. Create new settings table matching cloud schema exactly
+  await database.execAsync(`
+    CREATE TABLE settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT NOT NULL UNIQUE,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
+      version INTEGER NOT NULL DEFAULT 1,
+      key TEXT NOT NULL,
+      value TEXT,
+      UNIQUE (user_id, key)
+    );
+  `);
+
+  // 3. Migrate data: backfill created_at from updated_at, ensure user_id not null
+  await database.execAsync(`
+    INSERT INTO settings (uuid, user_id, created_at, updated_at, deleted_at, version, key, value)
+    SELECT
+      uuid,
+      COALESCE(user_id, '') AS user_id,
+      COALESCE(updated_at, datetime('now')) AS created_at,
+      updated_at,
+      deleted_at,
+      COALESCE(version, 1) AS version,
+      key,
+      value
+    FROM settings_old
+  `);
+
+  // 4. Drop old table
+  await database.execAsync('DROP TABLE settings_old');
+
+  // 5. Recreate the uuid index
+  await database.execAsync(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_uuid ON settings (uuid);'
+  );
+
+  await database.execAsync('PRAGMA foreign_keys = ON');
+  await database.runAsync('PRAGMA user_version = 14');
 }
 
 export async function initDatabase(): Promise<void> {

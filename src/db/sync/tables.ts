@@ -73,8 +73,8 @@ export async function readRowsForPush(
   const selectParts: string[] = [
     `${alias}.uuid AS id`,
     `${alias}.updated_at AS updated_at`,
-    // settings table doesn't have created_at — only tables with created_at column get it
-    ...(spec.table !== 'settings' ? [`${alias}.created_at AS created_at`] : []),
+    // Local `settings` table now has `created_at` (added in migrateV14).
+    `${alias}.created_at AS created_at`,
     `${alias}.deleted_at AS deleted_at`,
     `${alias}.version AS version`,
   ];

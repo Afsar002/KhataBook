@@ -9,10 +9,10 @@ import type { SQLiteBindValue, SQLiteDatabase } from 'expo-sqlite';
 import type { SyncTableSpec } from '@/db/sync/tables';
 
 function dataColumns(spec: SyncTableSpec): string[] {
-  // For settings, spec.columns already includes both 'key' and 'value'
-  // (see SYNC_TABLES in tables.ts), so no prefix needed — prefixing would
-  // duplicate 'key' and break the INSERT/UPDATE with "duplicate column name".
-  return spec.columns;
+  // For settings, spec.columns includes ['key', 'value'] but the local table
+  // now also has 'created_at' (added in migrateV14). We need to include it
+  // for INSERT/UPDATE operations so it gets written during pull.
+  return spec.table === 'settings' ? [...spec.columns, 'created_at'] : spec.columns;
 }
 
 /** Column values coerced to SQLite-safe types (dates from Postgres → ISO). */
