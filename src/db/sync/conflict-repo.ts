@@ -8,7 +8,7 @@
  * snapshot and queues it for upload. Device-local, never synced.
  */
 import { getDatabase, nowIso } from '@/db/database';
-import { enqueueChange } from '@/db/sync/queue-repo';
+import { enqueueChange } from '@/db/sync/queue';
 import { insertLocalRow, updateLocalRow } from '@/db/sync/rows';
 import { specFor } from '@/db/sync/tables';
 import type { SyncConflict } from '@/types';
@@ -133,11 +133,7 @@ export async function restoreLocalVersion(id: number): Promise<void> {
       await insertLocalRow(db, spec, restored);
     }
     // Push reads the live row, so a single queued op covers the restored version.
-    await enqueueChange(db, {
-      table: tableName,
-      operation: 'update',
-      recordUuid: String(local.uuid),
-    });
+    await enqueueChange(db, tableName, String(local.uuid), 'update');
     await resolveConflict(id);
   });
 }

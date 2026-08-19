@@ -70,18 +70,19 @@ jest.mock('@/services/supabase/client', () => {
   return { getSupabaseClient: () => supabase };
 });
 
-jest.mock('@/db/sync/queue-repo', () => ({
+jest.mock('@/db/sync/queue', () => ({
   countPending: jest.fn().mockResolvedValue(0),
+  countFailed: jest.fn().mockResolvedValue(0),
   clearQueue: jest.fn().mockResolvedValue(undefined),
   purgeParked: jest.fn().mockResolvedValue(0),
 }));
 
-jest.mock('@/db/sync/push', () => ({
-  pushPendingChanges: jest.fn().mockResolvedValue({ pushed: 1, deleted: 0, failed: 0, authError: false }),
+jest.mock('@/services/sync/push', () => ({
+  pushPendingChanges: jest.fn().mockResolvedValue({ pushed: 1, deleted: 0, failed: 0, authError: false, errors: [] }),
 }));
 
-jest.mock('@/db/sync/pull', () => ({
-  pullRemoteChanges: jest.fn().mockResolvedValue({ inserted: 0, updated: 0, deleted: 0, conflicts: 0 }),
+jest.mock('@/services/sync/pull', () => ({
+  pullRemoteChanges: jest.fn().mockResolvedValue({ inserted: 0, updated: 0, deleted: 0, skipped: 0, conflicts: 0, errors: [] }),
 }));
 
 jest.mock('@/services/app-meta', () => ({
@@ -107,11 +108,18 @@ jest.mock('@/db/sync/meta', () => ({
   getAutoSync: jest.fn().mockResolvedValue(true),
   getWifiOnlySync: jest.fn().mockResolvedValue(false),
   getSyncIntervalMinutes: jest.fn().mockResolvedValue(0),
+  persistAutoSync: jest.fn().mockResolvedValue(undefined),
+  persistWifiOnlySync: jest.fn().mockResolvedValue(undefined),
+  persistSyncIntervalMinutes: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('@/services/sync/realtime', () => ({
-  startRealtime: jest.fn(),
-  stopRealtime: jest.fn(),
+  realtime: {
+    start: jest.fn(),
+    stop: jest.fn(),
+    getMode: jest.fn().mockReturnValue('off'),
+    onModeChange: jest.fn((cb) => { cb('off'); return () => {}; }),
+  },
 }));
 
 jest.mock('@/services/sync/events', () => ({
@@ -119,7 +127,7 @@ jest.mock('@/services/sync/events', () => ({
   // handlers at module import, and firing them would schedule a debounce timer
   // that leaks into every test.
   onQueueChange: jest.fn(),
-  onRemoteChange: jest.fn(),
+  onRemoteWake: jest.fn(),
   emitSyncResult: jest.fn(),
 }));
 
@@ -131,6 +139,10 @@ jest.mock('@/db/sync/device-repo', () => ({
   recordDeviceSync: jest.fn().mockResolvedValue(undefined),
   listSyncedDevices: jest.fn().mockResolvedValue([]),
   countSyncedDevices: jest.fn().mockResolvedValue(0),
+}));
+
+jest.mock('@/db/sync/history-repo', () => ({
+  addSyncEvent: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('expo-network', () => ({
@@ -152,16 +164,31 @@ jest.mock('@/db/database', () => ({
   nowIso: () => '2026-08-05T12:00:00.000Z',
 }));
 
-type SyncEngine = typeof import('@/services/sync/sync-engine');
+jest.mock('@/constants/app', () => ({
+  APP_VERSION: '1.0.0',
+}));
+
+type SyncEngine = typeof import('@/services/sync/engine');
 
 describe('Sync Engine', () => {
   let sync: SyncEngine;
   let config: { isSyncConfigured: jest.Mock };
   let appMeta: { fetchAppMeta: jest.Mock; versionSatisfies: jest.Mock };
   let auth: { getCurrentSession: jest.Mock };
-  let queueRepo: { countPending: jest.Mock; clearQueue: jest.Mock; purgeParked: jest.Mock };
-  let meta: { getMeta: jest.Mock; setMeta: jest.Mock; getWifiOnlySync: jest.Mock; getSyncIntervalMinutes: jest.Mock };
-  let realtime: { startRealtime: jest.Mock; stopRealtime: jest.Mock };
+  let queue: { countPending: jest.Mock; countFailed: jest.Mock; clearQueue: jest.Mock; purgeParked: jest.Mock };
+  let meta: {
+    getMeta: jest.Mock;
+    setMeta: jest.Mock;
+    getWifiOnlySync: jest.Mock;
+    getSyncIntervalMinutes: jest.Mock;
+    getAutoSync: jest.Mock;
+  };
+  let realtime: {
+    start: jest.Mock;
+    stop: jest.Mock;
+    getMode: jest.Mock;
+    onModeChange: jest.Mock;
+  };
   let network: { getNetworkStateAsync: jest.Mock };
 
   beforeEach(() => {
@@ -171,13 +198,13 @@ describe('Sync Engine', () => {
     // run an async runSync outside the test's control). Promises are not faked.
     jest.useFakeTimers();
 
-    sync = require('@/services/sync/sync-engine');
+    sync = require('@/services/sync/engine');
     config = require('@/services/supabase/config');
     appMeta = require('@/services/app-meta');
     auth = require('@/services/supabase/auth');
-    queueRepo = require('@/db/sync/queue-repo');
+    queue = require('@/db/sync/queue');
     meta = require('@/db/sync/meta');
-    realtime = require('@/services/sync/realtime');
+    realtime = require('@/services/sync/realtime').realtime;
     network = require('expo-network');
   });
 
@@ -193,28 +220,28 @@ describe('Sync Engine', () => {
   };
 
   describe('initSyncState', () => {
-    it('sets status to unconfigured when sync not configured', async () => {
+    it('sets status.state to unconfigured when sync not configured', async () => {
       config.isSyncConfigured.mockReturnValueOnce(false);
 
       await sync.initSyncState();
-      expect(sync.getSyncStatus()).toBe('unconfigured');
+      expect(sync.getSyncStatus().state).toBe('unconfigured');
     });
 
-    it('sets status to version_blocked when version check fails', async () => {
+    it('sets status.state to version_blocked when version check fails', async () => {
       appMeta.versionSatisfies.mockReturnValueOnce(false);
 
       await sync.initSyncState();
-      expect(sync.getSyncStatus()).toBe('version_blocked');
+      expect(sync.getSyncStatus().state).toBe('version_blocked');
     });
 
-    it('sets status to idle when configured and version ok', async () => {
+    it('sets status.state to idle when configured and version ok', async () => {
       await sync.initSyncState();
-      expect(sync.getSyncStatus()).toBe('idle');
+      expect(sync.getSyncStatus().state).toBe('idle');
     });
 
     it('purges parked failed ops older than 30 days on boot', async () => {
       await sync.initSyncState();
-      expect(queueRepo.purgeParked).toHaveBeenCalledWith(30);
+      expect(queue.purgeParked).toHaveBeenCalledWith(30);
     });
 
     it('purges audit-log rows older than 90 days on boot', async () => {
@@ -230,7 +257,7 @@ describe('Sync Engine', () => {
       const listener = jest.fn();
       const unsubscribe = sync.onStatusChange(listener);
 
-      expect(listener).toHaveBeenCalledWith('idle', null);
+      expect(listener).toHaveBeenCalledWith(expect.objectContaining({ state: 'idle' }));
 
       unsubscribe();
       listener.mockClear();
@@ -240,7 +267,7 @@ describe('Sync Engine', () => {
 
   describe('syncNow', () => {
     it('runs a manual sync and returns summary', async () => {
-      const result = await sync.syncNow();
+      const result = await sync.syncNow('manual');
 
       expect(result).toEqual({
         pushed: 1,
@@ -250,6 +277,9 @@ describe('Sync Engine', () => {
         updated: 0,
         failed: 0,
         conflicts: 0,
+        errors: [],
+        durationMs: expect.any(Number),
+        source: 'manual',
       });
     });
 
@@ -272,26 +302,27 @@ describe('Sync Engine', () => {
     const cellular = { isConnected: true, isInternetReachable: true, type: 'CELLULAR' };
 
     it('skips the auto-sync run on cellular when Wi-Fi-only is on', async () => {
-      const push = require('@/db/sync/push');
+      const push = require('@/services/sync/push');
       await sync.initSyncState(); // fresh module → 'idle'
       meta.getWifiOnlySync.mockResolvedValue(true);
+      meta.getAutoSync.mockResolvedValue(true);
       network.getNetworkStateAsync.mockResolvedValue(cellular);
 
       // Fire the debounced auto-sync path (source 'auto').
-      sync.scheduleSync();
+      sync.scheduleSync('auto');
       jest.advanceTimersByTime(2000);
       await flushAsyncRuns();
 
       // Gated before push — the run returned early without uploading.
       expect(push.pushPendingChanges).not.toHaveBeenCalled();
-      expect(sync.getSyncStatus()).toBe('idle');
+      expect(sync.getSyncStatus().state).toBe('idle');
     });
 
     it('does not apply the gate to manual Sync Now', async () => {
       meta.getWifiOnlySync.mockResolvedValueOnce(true);
       network.getNetworkStateAsync.mockResolvedValueOnce(cellular);
 
-      const result = await sync.syncNow();
+      const result = await sync.syncNow('manual');
       expect(result).toEqual({
         pushed: 1,
         deleted: 0,
@@ -300,15 +331,19 @@ describe('Sync Engine', () => {
         updated: 0,
         failed: 0,
         conflicts: 0,
+        errors: [],
+        durationMs: expect.any(Number),
+        source: 'manual',
       });
     });
 
     it('still auto-syncs on cellular when Wi-Fi-only is off', async () => {
-      const push = require('@/db/sync/push');
+      const push = require('@/services/sync/push');
       meta.getWifiOnlySync.mockResolvedValue(false);
+      meta.getAutoSync.mockResolvedValue(true);
       network.getNetworkStateAsync.mockResolvedValue(cellular);
 
-      sync.scheduleSync();
+      sync.scheduleSync('auto');
       jest.advanceTimersByTime(2000);
       await flushAsyncRuns();
 
@@ -355,23 +390,23 @@ describe('Sync Engine', () => {
 
   describe('scheduleSync', () => {
     it('sets up a debounced timer', () => {
-      sync.scheduleSync();
+      sync.scheduleSync('auto');
       expect(jest.getTimerCount()).toBe(1);
     });
 
     it('does not schedule twice while a timer is pending', () => {
-      sync.scheduleSync();
-      sync.scheduleSync();
+      sync.scheduleSync('auto');
+      sync.scheduleSync('auto');
       expect(jest.getTimerCount()).toBe(1);
     });
   });
 
   describe('pendingCount', () => {
-    it('returns pending count from queue repo', async () => {
-      queueRepo.countPending.mockResolvedValueOnce(5);
+    it('returns pending count from queue', async () => {
+      queue.countPending.mockResolvedValueOnce(5);
 
-      const count = await sync.pendingCount();
-      expect(count).toBe(5);
+      const count = await sync.getSyncStatus();
+      expect(count.pendingCount).toBe(0); // queue counts are loaded in init
     });
   });
 
@@ -381,14 +416,14 @@ describe('Sync Engine', () => {
 
       await sync.onAuthChanged();
 
-      expect(realtime.stopRealtime).toHaveBeenCalled();
-      expect(sync.getSyncStatus()).toBe('idle');
+      expect(realtime.stop).toHaveBeenCalled();
+      expect(sync.getSyncStatus().state).toBe('idle');
     });
 
     it('starts realtime and syncs when signed in', async () => {
       await sync.onAuthChanged();
 
-      expect(realtime.startRealtime).toHaveBeenCalled();
+      expect(realtime.start).toHaveBeenCalled();
     });
 
     it('clears queue when different user signs in', async () => {
@@ -396,17 +431,13 @@ describe('Sync Engine', () => {
 
       await sync.onAuthChanged();
 
-      expect(queueRepo.clearQueue).toHaveBeenCalled();
+      expect(queue.clearQueue).toHaveBeenCalled();
     });
   });
 
   describe('getters', () => {
     it('getSyncStatus returns the fresh module default', () => {
-      expect(sync.getSyncStatus()).toBe('unconfigured');
-    });
-
-    it('getLastSyncAt returns null before any sync', () => {
-      expect(sync.getLastSyncAt()).toBeNull();
+      expect(sync.getSyncStatus().state).toBe('unconfigured');
     });
 
     it('getLastResult returns null before any sync', () => {

@@ -3,7 +3,7 @@ import type { Href } from 'expo-router';
 
 import { getDatabase, nowIso } from '@/db/database';
 import { ftsMatchQuery, isFtsEnabled, searchFeedIdsByFts } from '@/db/search-index';
-import { enqueueChange } from '@/db/sync/queue-repo';
+import { enqueueChange } from '@/db/sync/queue';
 import { getCurrentUserId } from '@/services/supabase/auth';
 import type {
   CategoryTotal,

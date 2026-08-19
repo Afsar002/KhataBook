@@ -52,14 +52,15 @@ import { wipeDatabase } from '@/db/database';
 import { countUnresolvedConflicts } from '@/db/sync/conflict-repo';
 import { listSyncEvents } from '@/db/sync/history-repo';
 import { listSyncedDevices } from '@/db/sync/device-repo';
-import { countFailed, countPending, retryAll } from '@/db/sync/queue-repo';
+import { countFailed, countPending, retryAll } from '@/db/sync/queue';
 import { useLastSyncFrom } from '@/hooks/use-last-sync-from';
 import { useTheme } from '@/hooks/use-theme';
 import { authenticateWithDevice, hasDeviceCredentials } from '@/services/app-lock/auth';
 import { getAppLockEnabled, setAppLockEnabled } from '@/services/app-lock/prefs';
 import { getDeviceName, setDeviceName } from '@/services/device/device-name';
 import { impact } from '@/utils/haptics';
-import type { SyncDevice, SyncHistoryEntry, SyncStatus } from '@/types';
+import type { SyncDevice, SyncHistoryEntry } from '@/types';
+import type { SyncStatus } from '@/services/sync/engine';
 import { todayISODate } from '@/utils/format';
 import { writeAndShareFile } from '@/utils/share';
 import { readFileFromDocuments } from '@/utils/file';
@@ -104,7 +105,7 @@ function syncStatusLabel(status: SyncStatus, syncing: boolean): string {
   if (syncing) {
     return 'Syncing…';
   }
-  switch (status) {
+  switch (status.state) {
     case 'unconfigured':
       return 'Not configured';
     case 'offline':
@@ -160,7 +161,6 @@ function CloudSyncCard() {
     lastSyncAt,
     lastResult,
     syncing,
-    realtimeMode,
     autoSync,
     setAutoSync,
     wifiOnly,
@@ -238,6 +238,22 @@ function CloudSyncCard() {
     }
   };
 
+  /** Shows detailed error info from the last sync run. */
+  const showLastSyncErrors = () => {
+    const { lastResult } = useSync();
+    if (!lastResult || lastResult.errors.length === 0) {
+      feedback.toast({ message: 'No errors in last sync.', tone: 'info' });
+      return;
+    }
+    const errorLines = lastResult.errors.map((e) =>
+      `${e.table} · ${e.operation} · ${e.code ?? 'N/A'}: ${e.message}`
+    );
+    feedback.alert({
+      title: `${lastResult.errors.length} sync error${lastResult.errors.length === 1 ? '' : 's'}`,
+      message: errorLines.join('\n\n'),
+    });
+  };
+
   const saveDeviceName = () => {
     impact('light');
     setDeviceBusy(true);
@@ -303,7 +319,7 @@ function CloudSyncCard() {
         <View style={styles.rowLabel}>
           <ThemedText type="default">Cloud Sync</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            {syncing ? 'Syncing now…' : autoSync ? 'Automatic backups on' : 'Auto sync off'}
+            {syncing ? 'Syncing now…' : status.autoSync ? 'Automatic backups on' : 'Auto sync off'}
           </ThemedText>
         </View>
       </View>
@@ -316,10 +332,10 @@ function CloudSyncCard() {
       <CloudInfoRow
         label="Live Sync"
         value={
-          realtimeMode === 'live' ? 'Live' : realtimeMode === 'trigger' ? 'Trigger-based' : 'Off'
+          status.realtimeMode === 'live' ? 'Live' : status.realtimeMode === 'degraded' ? 'Reconnecting…' : 'Off'
         }
         dotColor={
-          realtimeMode === 'live' ? theme.income : realtimeMode === 'trigger' ? theme.warning : theme.border
+          status.realtimeMode === 'live' ? theme.income : status.realtimeMode === 'degraded' ? theme.warning : theme.border
         }
       />
       {lastSyncFrom ? <CloudInfoRow label="From Device" value={lastSyncFrom} /> : null}
@@ -439,6 +455,16 @@ function CloudSyncCard() {
           subtitle="Reset the queue and upload again"
           icon={RefreshCw}
           onPress={handleRetryAll}
+          variant="outline"
+          height={56}
+        />
+      ) : null}
+      {failedCount > 0 ? (
+        <LargeButton
+          title="Show Sync Errors"
+          subtitle="See exactly why uploads failed"
+          icon={AlertTriangle}
+          onPress={showLastSyncErrors}
           variant="outline"
           height={56}
         />

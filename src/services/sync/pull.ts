@@ -13,13 +13,14 @@ import { getDatabase } from '@/db/database';
 import { addConflictRecord } from '@/db/sync/conflict-repo';
 import { addSyncEvent } from '@/db/sync/history-repo';
 import { cursorKey, getMeta, setMeta } from '@/db/sync/meta';
-import { listPendingChanges } from '@/db/sync/queue-repo';
+import { getPendingChanges } from '@/db/sync/queue';
 import { deleteLocalRow, insertLocalRow, updateLocalRow } from '@/db/sync/rows';
 import {
   loadUuidToIdMap,
   specFor,
   type SyncTableSpec,
 } from '@/db/sync/tables';
+import type { SyncError } from '@/services/sync/events';
 
 export interface PullResult {
   inserted: number;
@@ -28,6 +29,7 @@ export interface PullResult {
   skipped: number;
   /** Rows where a newer cloud row overwrote a local change that wasn't uploaded yet. */
   conflicts: number;
+  errors: SyncError[];
 }
 
 /** Internal table names → friendly labels used in the sync history log. */
@@ -55,7 +57,6 @@ function toLocalRow(
     updated_at: remote.updated_at,
     deleted_at: remote.deleted_at ?? null,
     version: remote.version ?? 1,
-    // Local `settings` table now has `created_at` (added in migrateV14).
     created_at: remote.created_at ?? null,
   };
   for (const column of spec.columns) {
@@ -105,16 +106,32 @@ async function fetchRemote(
   return (data ?? []) as Record<string, unknown>[];
 }
 
+function extractErrorDetails(error: unknown): { code?: string; message: string } {
+  const err = error as {
+    code?: string;
+    details?: string;
+    hint?: string;
+    message?: string;
+    status?: number;
+    statusText?: string;
+  };
+  const hasStructured =
+    err.code !== undefined || err.details !== undefined || err.hint !== undefined;
+  return hasStructured
+    ? { code: err.code, message: `${err.message ?? ''} ${err.details ?? ''} ${err.hint ?? ''}`.trim() }
+    : { message: error instanceof Error ? error.message : String(error) };
+}
+
 export async function pullRemoteChanges(
   supabase: SupabaseClient,
   _userId: string
 ): Promise<PullResult> {
   const db = getDatabase();
-  const result: PullResult = { inserted: 0, updated: 0, deleted: 0, skipped: 0, conflicts: 0 };
+  const result: PullResult = { inserted: 0, updated: 0, deleted: 0, skipped: 0, conflicts: 0, errors: [] };
 
   // A conflict is a local change that still sits in the upload queue being
   // overwritten by a newer cloud row. Collect the (table, uuid) pairs once.
-  const queued = await listPendingChanges();
+  const queued = await getPendingChanges();
   const queuedKeys = new Set(queued.map((entry) => `${entry.tableName}:${entry.recordUuid}`));
 
   const tableOrder = [
@@ -133,7 +150,14 @@ export async function pullRemoteChanges(
       continue;
     }
     const cursor = (await getMeta(cursorKey(table))) ?? '';
-    const remoteRows = await fetchRemote(supabase, table, cursor);
+    let remoteRows: Record<string, unknown>[];
+    try {
+      remoteRows = await fetchRemote(supabase, table, cursor);
+    } catch (error) {
+      const { code, message } = extractErrorDetails(error);
+      result.errors.push({ table, uuid: '', operation: 'pull', code, message });
+      continue; // continue with next table
+    }
     const uuidToId = await loadUuidToIdMap(table);
 
     let lastUpdatedAt = cursor;
@@ -170,8 +194,13 @@ export async function pullRemoteChanges(
                 remoteJson: null,
               });
             }
-            await deleteLocalRow(db, spec, localKey as string | number);
-            result.deleted += 1;
+            try {
+              await deleteLocalRow(db, spec, localKey as string | number);
+              result.deleted += 1;
+            } catch (error) {
+              const { code, message } = extractErrorDetails(error);
+              result.errors.push({ table, uuid: String(remote.id), operation: 'delete', code, message });
+            }
           }
         }
         continue;
@@ -190,25 +219,30 @@ export async function pullRemoteChanges(
         continue;
       }
 
-      if (local) {
-        const queuedKey = `${table}:${String(remote.id)}`;
-        if (queuedKeys.has(queuedKey)) {
-          result.conflicts += 1;
-          const message = `A newer ${labelFor(table)} from the cloud replaced an unsynced local change.`;
-          await addSyncEvent('conflict', message);
-          await addConflictRecord({
-            tableName: table,
-            recordUuid: String(remote.id),
-            message,
-            localJson: JSON.stringify(local),
-            remoteJson: JSON.stringify(remote),
-          });
+      try {
+        if (local) {
+          const queuedKey = `${table}:${String(remote.id)}`;
+          if (queuedKeys.has(queuedKey)) {
+            result.conflicts += 1;
+            const message = `A newer ${labelFor(table)} from the cloud replaced an unsynced local change.`;
+            await addSyncEvent('conflict', message);
+            await addConflictRecord({
+              tableName: table,
+              recordUuid: String(remote.id),
+              message,
+              localJson: JSON.stringify(local),
+              remoteJson: JSON.stringify(remote),
+            });
+          }
+          await updateLocalRow(db, spec, localRow);
+          result.updated += 1;
+        } else {
+          await insertLocalRow(db, spec, localRow);
+          result.inserted += 1;
         }
-        await updateLocalRow(db, spec, localRow);
-        result.updated += 1;
-      } else {
-        await insertLocalRow(db, spec, localRow);
-        result.inserted += 1;
+      } catch (error) {
+        const { code, message } = extractErrorDetails(error);
+        result.errors.push({ table, uuid: String(remote.id), operation: local ? 'update' : 'insert', code, message });
       }
     }
 
@@ -220,4 +254,3 @@ export async function pullRemoteChanges(
 
   return result;
 }
-

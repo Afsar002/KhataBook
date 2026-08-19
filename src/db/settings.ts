@@ -1,6 +1,6 @@
 /** Key/value app settings stored in SQLite. */
 import { getDatabase, nowIso } from '@/db/database';
-import { enqueueChange } from '@/db/sync/queue-repo';
+import { enqueueChange } from '@/db/sync/queue';
 import { getCurrentUserId } from '@/services/supabase/auth';
 import { uuid } from '@/utils/uuid';
 

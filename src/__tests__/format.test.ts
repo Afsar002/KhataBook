@@ -12,12 +12,8 @@ import {
 } from '@/utils/format';
 
 describe('formatDayMonth', () => {
-  it('formats "YYYY-MM-DD" as day + short month ("11 Aug")', () => {
-    expect(formatDayMonth('2026-08-11')).toMatch(/11\s+Aug/);
-  });
-
-  it('drops the year', () => {
-    expect(formatDayMonth('2026-08-11')).not.toMatch(/2026/);
+  it('formats "YYYY-MM-DD" as DD/MM/YYYY', () => {
+    expect(formatDayMonth('2026-08-11')).toBe('11/08/2026');
   });
 
   it('returns the raw input when the date is unparseable', () => {
@@ -26,10 +22,8 @@ describe('formatDayMonth', () => {
 });
 
 describe('formatRangeDate', () => {
-  it('includes weekday and 2-digit year ("Sat, 01 Aug 26")', () => {
-    expect(formatRangeDate('2026-08-01')).toMatch(/Sat/);
-    // Node ICU renders a comma before the 2-digit year: "Sat, 01 Aug, 26".
-    expect(formatRangeDate('2026-08-01')).toMatch(/01\s+Aug,?\s+26/);
+  it('formats "YYYY-MM-DD" as DD/MM/YYYY', () => {
+    expect(formatRangeDate('2026-08-01')).toBe('01/08/2026');
   });
 
   it('returns the raw input when the date is unparseable', () => {
@@ -38,8 +32,8 @@ describe('formatRangeDate', () => {
 });
 
 describe('formatLongDate', () => {
-  it('formats as day + month + full year ("11 Aug 2026")', () => {
-    expect(formatLongDate('2026-08-11')).toMatch(/11\s+Aug\s+2026/);
+  it('formats "YYYY-MM-DD" as DD/MM/YYYY', () => {
+    expect(formatLongDate('2026-08-11')).toBe('11/08/2026');
   });
 
   it('returns the raw input when the date is unparseable', () => {
@@ -48,8 +42,8 @@ describe('formatLongDate', () => {
 });
 
 describe('formatISOToDisplay (existing behavior, regression guard)', () => {
-  it('formats "YYYY-MM-DD" with 2-digit day and full year', () => {
-    expect(formatISOToDisplay('2026-08-04')).toMatch(/04\s+Aug\s+2026/);
+  it('formats "YYYY-MM-DD" as DD/MM/YYYY', () => {
+    expect(formatISOToDisplay('2026-08-04')).toBe('04/08/2026');
   });
 });
 

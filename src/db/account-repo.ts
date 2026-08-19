@@ -1,7 +1,7 @@
 /** Account queries. */
 import { getDatabase, nowIso } from '@/db/database';
 import { ACCOUNT_BASE, FTS_TABLE, ftsMatchQuery, isFtsEnabled } from '@/db/search-index';
-import { enqueueChange } from '@/db/sync/queue-repo';
+import { enqueueChange } from '@/db/sync/queue';
 import { getCurrentUserId } from '@/services/supabase/auth';
 import type { Account, AccountBalance, AccountType } from '@/types';
 import { likeParam, SEARCH_LIMIT } from '@/utils/search';

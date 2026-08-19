@@ -1,127 +1,182 @@
 /**
- * Live multi-device sync.
+ * Live multi-device sync — Realtime controller with reconnect backoff.
  *
  * Subscribes to Supabase Postgres Changes for every synced table and emits a
- * `remote-change` event whenever the cloud reports a row change. The sync
- * engine turns that into a debounced pull, so rows edited on another device
- * appear here within a couple of seconds.
+ * `remoteWake` event whenever the cloud reports a row change. The sync engine
+ * turns that into a debounced pull.
  *
- * Realtime is a wake-up signal only: rows are never applied directly from the
- * payload. Pulling the same way the app already does means last-write-wins and
- * cursor handling stay in exactly one place. Echoes of this device's own pushes
- * arrive as events too and are skipped by the "local row is newer" check.
- *
- * Lifecycle follows the auth session: `startRealtime()` on sign-in,
- * `stopRealtime()` on sign-out. Both are safe to call when cloud sync is not
- * configured — they no-op so offline mode is unchanged.
+ * Lifecycle follows the auth session: `start()` on sign-in, `stop()` on sign-out.
+ * Both are safe to call when cloud sync is not configured — they no-op.
  */
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 
 import { SYNC_TABLES } from '@/db/sync/tables';
 import { getSupabaseClient } from '@/services/supabase/client';
-import { emitRemoteChange } from '@/services/sync/events';
-import type { RealtimeMode } from '@/types';
+import { emitRemoteWake } from '@/services/sync/events';
+
+export type RealtimeMode = 'off' | 'connecting' | 'live' | 'degraded';
+
+export interface RealtimeController {
+  start(getClient?: () => SupabaseClient | null): Promise<void>;
+  stop(getClient?: () => SupabaseClient | null): Promise<void>;
+  onModeChange(listener: (mode: RealtimeMode) => void): () => void;
+  getMode(): RealtimeMode;
+}
 
 /** Name of the single channel carrying all table filters. */
 const CHANNEL_NAME = 'dailykhata-live-sync';
 
-let channel: RealtimeChannel | null = null;
+/** Reconnect backoff schedule (ms). */
+const RECONNECT_DELAYS = [2000, 4000, 8000, 16000, 30000];
 
-/** Latest channel state, so the UI can show "Live" vs "Trigger-based". */
-let mode: RealtimeMode = 'off';
-const modeListeners: ((mode: RealtimeMode) => void)[] = [];
+function createController(): RealtimeController {
+  let channel: RealtimeChannel | null = null;
+  let mode: RealtimeMode = 'off';
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let stopping = false;
+  const modeListeners: ((mode: RealtimeMode) => void)[] = [];
 
-function setMode(next: RealtimeMode): void {
-  if (mode !== next) {
-    mode = next;
-    for (const listener of [...modeListeners]) {
-      listener(mode);
+  function setMode(next: RealtimeMode): void {
+    if (mode !== next) {
+      mode = next;
+      for (const listener of [...modeListeners]) {
+        listener(mode);
+      }
     }
   }
-}
 
-/** The current live-sync mode ('off' when realtime was never started). */
-export function getRealtimeMode(): RealtimeMode {
-  return mode;
-}
-
-/** Subscribes to mode changes; fires immediately with the current mode. */
-export function onRealtimeModeChange(listener: (mode: RealtimeMode) => void): () => void {
-  modeListeners.push(listener);
-  listener(mode);
-  return () => {
-    const index = modeListeners.indexOf(listener);
-    if (index !== -1) {
-      modeListeners.splice(index, 1);
+  function clearReconnectTimer(): void {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
+  }
+
+  async function doSubscribe(supabase: SupabaseClient): Promise<void> {
+    if (stopping || channel) return;
+
+    setMode('connecting');
+
+    // Guard: if a channel with our name already exists (e.g. from a previous
+    // session that didn't clean up), remove it first. Calling .on() on an
+    // already-subscribed channel throws "cannot add postgres_changes callbacks
+    // after subscribe()". supabase.channel() returns the EXISTING channel when
+    // called with a duplicate name while it's still subscribed.
+    const existing = supabase.getChannels().find((c) => c.topic === `realtime:${CHANNEL_NAME}`);
+    if (existing) {
+      try {
+        await supabase.removeChannel(existing);
+      } catch (err) {
+        console.warn('Realtime: removed stale channel before restart:', err);
+      }
+    }
+
+    channel = supabase.channel(CHANNEL_NAME, {
+      config: {
+        // Pin VSN 1.0.0 for React Native WebSocket compatibility
+        // (VSN 2.0.0 uses binary ArrayBuffer frames that Android mishandles)
+        vsn: '1.0.0',
+      },
+    });
+
+    for (const spec of SYNC_TABLES) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: spec.table },
+        () => {
+          emitRemoteWake();
+        }
+      );
+    }
+
+    channel.subscribe((status, error) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('[Realtime] SUBSCRIBED — live sync active');
+        reconnectAttempt = 0;
+        setMode('live');
+        return;
+      }
+
+      if (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.warn('[Realtime] subscribe failed:', errMsg);
+        console.warn(
+          '[Realtime] subscribe error (full):',
+          JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
+        );
+        console.warn('[Realtime] endpoint:', supabase.realtime.endPoint);
+      }
+
+      // Not subscribed (TIMED_OUT / CHANNEL_ERROR / CLOSED) — schedule reconnect
+      if (!stopping) {
+        setMode('degraded');
+        scheduleReconnect(supabase);
+      } else {
+        setMode('off');
+      }
+    });
+  }
+
+  function scheduleReconnect(supabase: SupabaseClient): void {
+    clearReconnectTimer();
+    const delay = RECONNECT_DELAYS[Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1)];
+    reconnectAttempt += 1;
+    console.log(`[Realtime] scheduling reconnect in ${delay}ms (attempt ${reconnectAttempt})`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (!stopping && channel) {
+        void doSubscribe(supabase);
+      }
+    }, delay);
+  }
+
+  return {
+    async start(getClient: () => SupabaseClient | null = getSupabaseClient): Promise<void> {
+      const supabase = getClient();
+      if (!supabase || channel || stopping) {
+        return;
+      }
+      stopping = false;
+      await doSubscribe(supabase);
+    },
+
+    async stop(getClient: () => SupabaseClient | null = getSupabaseClient): Promise<void> {
+      const supabase = getClient();
+      stopping = true;
+      clearReconnectTimer();
+
+      const current = channel;
+      if (supabase && current) {
+        try {
+          await supabase.removeChannel(current);
+        } catch (err) {
+          console.warn('Realtime channel removal failed:', err);
+        }
+      }
+
+      if (channel === current) {
+        channel = null;
+        setMode('off');
+      }
+    },
+
+    onModeChange(listener: (mode: RealtimeMode) => void): () => void {
+      modeListeners.push(listener);
+      listener(mode);
+      return () => {
+        const index = modeListeners.indexOf(listener);
+        if (index !== -1) {
+          modeListeners.splice(index, 1);
+        }
+      };
+    },
+
+    getMode(): RealtimeMode {
+      return mode;
+    },
   };
 }
 
-/** Starts listening for cloud changes. No-op when unconfigured or already running. */
-export async function startRealtime(getClient: () => SupabaseClient | null = getSupabaseClient): Promise<void> {
-  const supabase = getClient();
-  if (!supabase || channel) {
-    return;
-  }
-  // Assume trigger-based until the channel confirms SUBSCRIBED.
-  setMode('trigger');
-  // Guard: if a channel with our name already exists (e.g. from a previous
-  // session that didn't clean up), remove it first. Calling .on() on an
-  // already-subscribed channel throws "cannot add postgres_changes callbacks
-  // after subscribe()". supabase.channel() returns the EXISTING channel when
-  // called with a duplicate name while it's still subscribed.
-  const existing = supabase.getChannels().find((c) => c.topic === `realtime:${CHANNEL_NAME}`);
-  if (existing) {
-    try {
-      await supabase.removeChannel(existing);
-    } catch (err) {
-      console.warn('Realtime: removed stale channel before restart:', err);
-    }
-  }
-  channel = supabase.channel(CHANNEL_NAME);
-  for (const spec of SYNC_TABLES) {
-    channel.on('postgres_changes', { event: '*', schema: 'public', table: spec.table }, () => {
-      emitRemoteChange();
-    });
-  }
-  channel.subscribe((status, error) => {
-    if (status === 'SUBSCRIBED') {
-      setMode('live');
-      return;
-    }
-    if (error) {
-      // Dump the full error object — Supabase realtime errors carry a
-      // `code`/`reason` that the plain `.message` drops, which is exactly
-      // what you need to diagnose a "transport failure".
-      console.warn('Realtime subscribe failed:', error.message);
-      console.warn(
-        'Realtime subscribe error (full):',
-        JSON.stringify(error, Object.getOwnPropertyNames(error), 2),
-      );
-      console.warn('Realtime endpoint:', supabase.realtime.endPoint);
-    }
-    // Not subscribed (TIMED_OUT / CHANNEL_ERROR / CLOSED) — back to polling.
-    setMode('trigger');
-  });
-}
-
-/** Stops listening and releases the channel. Safe to call multiple times. */
-export async function stopRealtime(getClient: () => SupabaseClient | null = getSupabaseClient): Promise<void> {
-  const supabase = getClient();
-  const current = channel;
-  if (supabase && current) {
-    // Await removal so the channel is fully gone before we allow a new one.
-    // This prevents "cannot add callbacks after subscribe()" on rapid auth changes.
-    // If removal fails, we still null the ref to avoid a stuck stale channel.
-    try {
-      await supabase.removeChannel(current);
-    } catch (err) {
-      console.warn('Realtime channel removal failed:', err);
-    }
-  }
-  // Only clear if it's still the same channel (avoids clobbering a new startRealtime)
-  if (channel === current) {
-    channel = null;
-    setMode('off');
-  }
-}
+// Singleton instance
+export const realtime = createController();

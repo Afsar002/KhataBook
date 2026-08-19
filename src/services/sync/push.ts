@@ -9,15 +9,16 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { MAX_RETRY_COUNT, listPendingChanges, markDone, markFailed } from '@/db/sync/queue-repo';
+import { MAX_RETRY_COUNT, getPendingChanges, markDone, markFailed } from '@/db/sync/queue';
 import { readRowForPush } from '@/db/sync/tables';
+import type { SyncError } from '@/services/sync/events';
 
 export interface PushResult {
   pushed: number;
   deleted: number;
   failed: number;
-  /** True when auth failed (expired/revoked token) and push must stop. */
   authError: boolean;
+  errors: SyncError[];
 }
 
 function isAuthError(error: unknown): boolean {
@@ -40,12 +41,28 @@ function tablePriority(table: string): number {
   return index === -1 ? order.length : index;
 }
 
+function extractErrorDetails(error: unknown): { code?: string; message: string } {
+  const err = error as {
+    code?: string;
+    details?: string;
+    hint?: string;
+    message?: string;
+    status?: number;
+    statusText?: string;
+  };
+  const hasStructured =
+    err.code !== undefined || err.details !== undefined || err.hint !== undefined;
+  return hasStructured
+    ? { code: err.code, message: `${err.message ?? ''} ${err.details ?? ''} ${err.hint ?? ''}`.trim() }
+    : { message: error instanceof Error ? error.message : String(error) };
+}
+
 export async function pushPendingChanges(
   supabase: SupabaseClient,
   userId: string
 ): Promise<PushResult> {
-  const result: PushResult = { pushed: 0, deleted: 0, failed: 0, authError: false };
-  const pending = await listPendingChanges();
+  const result: PushResult = { pushed: 0, deleted: 0, failed: 0, authError: false, errors: [] };
+  const pending = await getPendingChanges();
 
   // Parents first so cloud foreign keys resolve on the first attempt.
   const ordered = [...pending].sort(
@@ -57,7 +74,6 @@ export async function pushPendingChanges(
       continue; // parked; a manual Sync Now will retry
     }
 
-    // Scoped here so the catch block can log exactly what we tried to send.
     let sentPayload: Record<string, unknown> | null = null;
 
     try {
@@ -91,58 +107,23 @@ export async function pushPendingChanges(
         return result; // stop — the session needs refreshing/re-auth
       }
 
-      const operation = entry.operation;
-      const table = entry.tableName;
-      const recordUuid = entry.recordUuid;
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const { code, message } = extractErrorDetails(error);
 
-      // Supabase's PostgrestError carries structured fields (code/details/hint)
-      // that the plain message string drops. Dump ALL of them.
-      const supabaseErr = error as {
-        code?: string;
-        details?: string;
-        hint?: string;
-        message?: string;
-        status?: number;
-        statusText?: string;
-      };
-      const hasStructuredFields =
-        supabaseErr.code !== undefined ||
-        supabaseErr.details !== undefined ||
-        supabaseErr.hint !== undefined;
-
-      console.error(`[Sync Push Failed] table=${table} uuid=${recordUuid} operation=${operation}`);
-      console.error(
-        `[Sync Push Failed] Supabase error: ${
-          hasStructuredFields
-            ? JSON.stringify(
-                {
-                  code: supabaseErr.code,
-                  details: supabaseErr.details,
-                  hint: supabaseErr.hint,
-                  message: supabaseErr.message,
-                  status: supabaseErr.status,
-                  statusText: supabaseErr.statusText,
-                },
-                null,
-                2
-              )
-            : errMsg
-        }`
-      );
-      // The exact cloud-shaped payload that Supabase rejected.
-      console.error(
-        `[Sync Push Failed] Payload sent: ${JSON.stringify(sentPayload, null, 2)}`
-      );
-      // The JSON snapshot captured when the change was enqueued (diagnostics).
+      console.error(`[Sync Push Failed] table=${entry.tableName} uuid=${entry.recordUuid} operation=${entry.operation}`);
+      console.error(`[Sync Push Failed] Supabase error:`, { code, message });
+      console.error(`[Sync Push Failed] Payload sent: ${JSON.stringify(sentPayload, null, 2)}`);
       console.error(`[Sync Push Failed] Queued payload snapshot: ${entry.payload}`);
-      // Full raw error object (may include network/HTTP details on top of the above).
-      console.error(
-        `[Sync Push Failed] Full raw error: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`
-      );
 
       result.failed += 1;
+      result.errors.push({
+        table: entry.tableName,
+        uuid: entry.recordUuid,
+        operation: entry.operation,
+        code,
+        message,
+      });
       await markFailed(entry.id, entry.retryCount + 1);
+      // Continue with the rest of the queue — don't stop on one failure.
     }
   }
 

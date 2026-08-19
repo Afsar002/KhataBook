@@ -1,6 +1,6 @@
 /** Category queries and CRUD (add / rename / delete). */
 import { getDatabase, nowIso } from '@/db/database';
-import { enqueueChange } from '@/db/sync/queue-repo';
+import { enqueueChange } from '@/db/sync/queue';
 import { getCurrentUserId } from '@/services/supabase/auth';
 import type { Category, TransactionType } from '@/types';
 import { uuid } from '@/utils/uuid';

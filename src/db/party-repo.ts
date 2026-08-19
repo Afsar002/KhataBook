@@ -10,7 +10,7 @@
  */
 import { getDatabase, nowIso } from '@/db/database';
 import { FTS_TABLE, PARTY_BASE, ftsMatchQuery, isFtsEnabled } from '@/db/search-index';
-import { enqueueChange } from '@/db/sync/queue-repo';
+import { enqueueChange } from '@/db/sync/queue';
 import { LEDGER_PAGE_SIZE, type LedgerCursor } from '@/db/transaction-repo';
 import { getCurrentUserId } from '@/services/supabase/auth';
 import type {

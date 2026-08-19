@@ -5,7 +5,7 @@
  * Which (table, uuid) pairs count as "local changes that can be overwritten"
  * comes from `listPendingChanges`, so the mocks fully control conflict setup.
  */
-import { pullRemoteChanges } from '@/db/sync/pull';
+import { pullRemoteChanges } from '@/services/sync/pull';
 
 const mockDb = {
   getFirstAsync: jest.fn().mockResolvedValue(null),
@@ -27,8 +27,8 @@ jest.mock('@/db/sync/history-repo', () => ({
   addSyncEvent: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('@/db/sync/queue-repo', () => ({
-  listPendingChanges: jest.fn().mockResolvedValue([]),
+jest.mock('@/db/sync/queue', () => ({
+  getPendingChanges: jest.fn().mockResolvedValue([]),
 }));
 
 jest.mock('@/db/sync/tables', () => ({
@@ -81,13 +81,13 @@ describe('pullRemoteChanges conflict detection', () => {
     const { getDatabase } = require('@/db/database');
     getDatabase.mockReturnValue(mockDb);
     // Reset the per-test default (clearAllMocks doesn't drop implementations).
-    const { listPendingChanges } = require('@/db/sync/queue-repo');
-    listPendingChanges.mockResolvedValue([]);
+    const { getPendingChanges } = require('@/db/sync/queue');
+    getPendingChanges.mockResolvedValue([]);
   });
 
   it('counts and logs a conflict when a queued local change is overwritten', async () => {
-    const { listPendingChanges } = require('@/db/sync/queue-repo');
-    listPendingChanges.mockResolvedValue([queuedOp]);
+    const { getPendingChanges } = require('@/db/sync/queue');
+    getPendingChanges.mockResolvedValue([queuedOp]);
     mockDb.getFirstAsync.mockResolvedValue({ id: 5, updated_at: '2026-01-01T00:00:00.000Z' });
 
     const result = await pullRemoteChanges(makeSupabase([remoteRow()]) as never, 'user-1');
@@ -110,8 +110,8 @@ describe('pullRemoteChanges conflict detection', () => {
   });
 
   it('counts a conflict when a tombstone deletes a queued local row', async () => {
-    const { listPendingChanges } = require('@/db/sync/queue-repo');
-    listPendingChanges.mockResolvedValue([queuedOp]);
+    const { getPendingChanges } = require('@/db/sync/queue');
+    getPendingChanges.mockResolvedValue([queuedOp]);
     mockDb.getFirstAsync.mockResolvedValue({ id: 5, updated_at: '2026-01-01T00:00:00.000Z' });
 
     const result = await pullRemoteChanges(

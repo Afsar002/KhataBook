@@ -9,7 +9,7 @@
  */
 import { AppState, Platform } from 'react-native';
 
-import type { SyncSummary } from '@/services/sync/sync-engine';
+import type { SyncResult } from '@/services/sync/engine';
 import { onSyncResult } from '@/services/sync/events';
 import {
   areNotificationsPermitted,
@@ -24,7 +24,7 @@ let initialized = false;
 let lastNotifiedAt = 0;
 
 /** Maps a finished-sync summary to a notification, or null when nothing to say. */
-function syncNotification(summary: SyncSummary): { title: string; body: string } | null {
+function syncNotification(summary: SyncResult): { title: string; body: string } | null {
   if (summary.conflicts > 0) {
     return {
       title: 'Sync finished',
@@ -56,7 +56,7 @@ function syncNotification(summary: SyncSummary): { title: string; body: string }
 }
 
 /** Schedules the notification, honoring the toggle, permission and cooldown. */
-async function maybeNotifySync(summary: SyncSummary): Promise<void> {
+async function maybeNotifySync(summary: SyncResult): Promise<void> {
   if (Platform.OS === 'web') {
     return;
   }

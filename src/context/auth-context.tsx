@@ -23,7 +23,7 @@ import {
   type AuthResult,
 } from '@/services/supabase/auth';
 import { isSyncConfigured } from '@/services/supabase/config';
-import { onAuthChanged } from '@/services/sync/sync-engine';
+import { onAuthChanged } from '@/services/sync/engine';
 import { getSupabaseClient } from '@/services/supabase/client';
 import { unregisterRecurringTask } from '@/services/recurring/scheduler';
 

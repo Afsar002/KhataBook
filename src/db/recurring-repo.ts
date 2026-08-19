@@ -77,7 +77,7 @@ export async function addRecurringTemplate(
     now
   );
 
-  emitRecurringChanged();
+  emitRemoteWake();
   return result.lastInsertRowId;
 }
 
@@ -130,13 +130,13 @@ export async function updateRecurringTemplate(
     `UPDATE recurring_templates SET ${fields.join(', ')} WHERE id = ?`,
     ...values
   );
-  emitRecurringChanged();
+  emitRemoteWake();
 }
 
 export async function deleteRecurringTemplate(id: number): Promise<void> {
   const db = getDatabase();
   await db.runAsync('DELETE FROM recurring_templates WHERE id = ?', id);
-  emitRecurringChanged();
+  emitRemoteWake();
 }
 
 export async function getRecurringTemplate(id: number): Promise<RecurringTemplate | null> {

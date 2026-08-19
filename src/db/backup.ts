@@ -8,7 +8,7 @@
  */
 
 import { getDatabase, nowIso } from '@/db/database';
-import { clearQueue, enqueueChange } from '@/db/sync/queue-repo';
+import { clearQueue, enqueueChange } from '@/db/sync/queue';
 import { uuid } from '@/utils/uuid';
 import { fetchAppMeta } from '@/services/app-meta';
 

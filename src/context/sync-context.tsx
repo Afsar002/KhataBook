@@ -8,37 +8,26 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import {
-  getAutoSync,
-  getSyncIntervalMinutes,
-  getWifiOnlySync,
-  setAutoSync as persistAutoSync,
-  setSyncIntervalMinutes as persistSyncIntervalMinutes,
-  setWifiOnlySync as persistWifiOnlySync,
-} from '@/db/sync/meta';
-import {
-  armPeriodicSync,
-  getLastResult,
-  getLastSyncAt,
   getSyncStatus,
   initSyncState,
   isSyncing,
+  onResult,
   onStatusChange,
+  setAutoSync,
+  setIntervalMinutes,
+  setWifiOnly,
   syncNow,
-  type SyncSummary,
-} from '@/services/sync/sync-engine';
-import { getRealtimeMode, onRealtimeModeChange } from '@/services/sync/realtime';
-import type { RealtimeMode, SyncStatus } from '@/types';
+  type SyncResult,
+  type SyncStatus,
+} from '@/services/sync/engine';
 import { getSupabaseClient } from '@/services/supabase/client';
 
 interface SyncContextValue {
   status: SyncStatus;
-  lastSyncAt: string | null;
   /** Outcome of the most recent sync run (pushed/pulled/failed/conflicts). */
-  lastResult: SyncSummary | null;
+  lastResult: SyncResult | null;
   /** True while a sync run is in flight. */
   syncing: boolean;
-  /** Live multi-device sync: 'live' | 'trigger' | 'off'. */
-  realtimeMode: RealtimeMode;
   /** Whether local edits auto-upload (off by default only if the user turns it off). */
   autoSync: boolean;
   setAutoSync: (value: boolean) => void;
@@ -56,89 +45,64 @@ const SyncContext = createContext<SyncContextValue | null>(null);
 
 export function SyncProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SyncStatus>(getSyncStatus());
-  const [lastSyncAt, setLastSyncAt] = useState<string | null>(getLastSyncAt());
-  const [lastResult, setLastResult] = useState<SyncSummary | null>(getLastResult());
+  const [lastResult, setLastResult] = useState<SyncResult | null>(null);
   const [syncing, setSyncing] = useState(isSyncing());
-  const [realtimeMode, setRealtimeMode] = useState<RealtimeMode>(getRealtimeMode());
-  const [autoSync, setAutoSyncState] = useState(true);
-  const [wifiOnly, setWifiOnlyState] = useState(false);
-  const [intervalMinutes, setIntervalMinutesState] = useState(0);
 
   useEffect(() => {
-    void initSyncState(getSupabaseClient).then(() => {
-      setStatus(getSyncStatus());
-      setLastSyncAt(getLastSyncAt());
-      setLastResult(getLastResult());
-    });
-    void getAutoSync().then(setAutoSyncState);
-    void getWifiOnlySync().then(setWifiOnlyState);
-    void getSyncIntervalMinutes().then((minutes) => {
-      setIntervalMinutesState(minutes);
-      void armPeriodicSync();
-    });
+    void initSyncState(getSupabaseClient);
 
-    const unsubscribe = onStatusChange((nextStatus, nextLastSyncAt) => {
+    const unsubscribeStatus = onStatusChange((nextStatus) => {
       setStatus(nextStatus);
-      setLastSyncAt(nextLastSyncAt);
-      setLastResult(getLastResult());
-      setSyncing(isSyncing());
+      setSyncing(nextStatus.state === 'syncing');
     });
 
-    const unsubscribeRealtime = onRealtimeModeChange(setRealtimeMode);
+    const unsubscribeResult = onResult((result) => {
+      setLastResult(result);
+    });
 
     return () => {
-      unsubscribe();
-      unsubscribeRealtime();
+      unsubscribeStatus();
+      unsubscribeResult();
     };
   }, []);
 
-  const setAutoSync = useCallback((value: boolean) => {
-    setAutoSyncState(value);
-    void persistAutoSync(value);
+  const handleSetAutoSync = useCallback(async (value: boolean) => {
+    await setAutoSync(value);
   }, []);
 
-  const setWifiOnly = useCallback((value: boolean) => {
-    setWifiOnlyState(value);
-    void persistWifiOnlySync(value);
+  const handleSetWifiOnly = useCallback(async (value: boolean) => {
+    await setWifiOnly(value);
   }, []);
 
-  const setIntervalMinutes = useCallback((value: number) => {
+  const handleSetIntervalMinutes = useCallback(async (value: number) => {
     const minutes = Math.max(0, Math.floor(value));
-    setIntervalMinutesState(minutes);
-    void persistSyncIntervalMinutes(minutes).then(() => void armPeriodicSync());
+    await setIntervalMinutes(minutes);
   }, []);
 
   const runNow = useCallback(async () => {
-    await syncNow(getSupabaseClient);
+    await syncNow('manual', getSupabaseClient);
   }, []);
 
   const value = useMemo(
     () => ({
       status,
-      lastSyncAt,
       lastResult,
       syncing,
-      realtimeMode,
-      autoSync,
-      setAutoSync,
-      wifiOnly,
-      setWifiOnly,
-      intervalMinutes,
-      setIntervalMinutes,
+      autoSync: status.autoSync,
+      setAutoSync: handleSetAutoSync,
+      wifiOnly: status.wifiOnly,
+      setWifiOnly: handleSetWifiOnly,
+      intervalMinutes: status.intervalMinutes,
+      setIntervalMinutes: handleSetIntervalMinutes,
       runNow,
     }),
     [
       status,
-      lastSyncAt,
       lastResult,
       syncing,
-      realtimeMode,
-      autoSync,
-      setAutoSync,
-      wifiOnly,
-      setWifiOnly,
-      intervalMinutes,
-      setIntervalMinutes,
+      handleSetAutoSync,
+      handleSetWifiOnly,
+      handleSetIntervalMinutes,
       runNow,
     ]
   );
