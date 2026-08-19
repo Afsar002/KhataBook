@@ -184,15 +184,15 @@ export async function initSyncState(
   onQueueChange(() => scheduleSync('auto'));
   onRemoteWake(() => scheduleSync('realtime'));
 
-  // Start realtime listener
+  // Subscribe to realtime mode changes
+  realtime.onModeChange((mode) => updateStatus({ realtimeMode: mode }));
+
+  // Start realtime if there's already a session (e.g. restored from AsyncStorage)
   const session = getCurrentSession();
   if (session?.user.id) {
     await realtime.start(getClient);
     updateStatus({ realtimeMode: realtime.getMode() });
   }
-
-  // Subscribe to realtime mode changes
-  realtime.onModeChange((mode) => updateStatus({ realtimeMode: mode }));
 
   // Arm periodic sync if configured
   await armPeriodicSync();
@@ -331,6 +331,7 @@ async function runSync(
 
   running = true;
   const startTime = Date.now();
+  const now = nowIso();
   setState('syncing');
 
   const userId = session.user.id;
@@ -339,12 +340,14 @@ async function runSync(
     const pushResult = await pushPendingChanges(supabase, userId);
     if (pushResult.authError) {
       setState('idle');
+      // Still record the sync attempt timestamp so "Last sync" isn't "Never"
+      await setMeta(LAST_SYNC_KEY, now);
+      updateStatus({ lastSyncAt: now });
       return null; // token expired — re-auth resumes syncing
     }
 
     const pullResult = await pullRemoteChanges(supabase, userId);
 
-    const now = nowIso();
     await setMeta(LAST_SYNC_KEY, now);
     if (pushResult.failed === 0) {
       await setMeta(LAST_SUCCESS_KEY, now);
@@ -411,14 +414,41 @@ async function runSync(
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error(`[Sync Engine Error] source=${source} error=${errMsg}`);
-    setState('error');
+
+    // Record the sync attempt timestamp even on unexpected errors
+    await setMeta(LAST_SYNC_KEY, now);
+    updateStatus({
+      lastSyncAt: now,
+      state: 'error'
+    });
+
+    // Create an error result so the UI can display what went wrong
+    const errorResult: SyncResult = {
+      pushed: 0,
+      deleted: 0,
+      pulled: 0,
+      inserted: 0,
+      updated: 0,
+      failed: 0,
+      conflicts: 0,
+      errors: [{
+        table: 'sync_engine',
+        uuid: '',
+        operation: 'sync',
+        code: 'UNEXPECTED_ERROR',
+        message: errMsg,
+      }],
+      durationMs: Date.now() - startTime,
+      source,
+    };
+    lastResult = errorResult;
+    emitResult(errorResult);
+
     if (source !== 'manual' && (await getAutoSync())) {
       scheduleRetry();
     }
-    if (source === 'manual') {
-      throw error;
-    }
-    return null;
+    // Don't re-throw for manual — let the UI show the error via lastResult
+    return errorResult;
   } finally {
     running = false;
   }
@@ -498,9 +528,10 @@ export async function onAuthChanged(
     // Listen for changes made on other devices while signed in.
     await realtime.stop(getClient);
     await realtime.start(getClient);
-    updateStatus({ realtimeMode: realtime.getMode() });
+    // Note: realtime mode will be updated via the onModeChange listener
 
     // A fresh login downloads the user's data (automatic restore).
+    // Don't throw on error — let the UI display it via lastResult
     await syncNow('manual', getClient);
   } finally {
     resolveNext!();

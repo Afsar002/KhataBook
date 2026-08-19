@@ -239,8 +239,7 @@ function CloudSyncCard() {
   };
 
   /** Shows detailed error info from the last sync run. */
-  const showLastSyncErrors = () => {
-    const { lastResult } = useSync();
+  const showLastSyncErrors = useCallback(() => {
     if (!lastResult || lastResult.errors.length === 0) {
       feedback.toast({ message: 'No errors in last sync.', tone: 'info' });
       return;
@@ -252,7 +251,7 @@ function CloudSyncCard() {
       title: `${lastResult.errors.length} sync error${lastResult.errors.length === 1 ? '' : 's'}`,
       message: errorLines.join('\n\n'),
     });
-  };
+  }, [lastResult]);
 
   const saveDeviceName = () => {
     impact('light');
