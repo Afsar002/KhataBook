@@ -24,7 +24,7 @@ jest.mock('@/db/database', () => ({
   nowIso: jest.fn(() => '2026-08-11T00:00:00.000Z'),
 }));
 
-jest.mock('@/db/sync/queue-repo', () => ({
+jest.mock('@/db/sync/queue', () => ({
   enqueueChange: jest.fn(),
 }));
 

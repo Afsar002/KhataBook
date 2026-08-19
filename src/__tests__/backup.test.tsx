@@ -23,7 +23,7 @@ jest.mock('@/db/database', () => ({
   nowIso: () => '2026-08-05T12:00:00.000Z',
 }));
 
-jest.mock('@/db/sync/queue-repo', () => ({
+jest.mock('@/db/sync/queue', () => ({
   clearQueue: jest.fn().mockResolvedValue(undefined),
   enqueueChange: jest.fn().mockResolvedValue(undefined),
 }));
@@ -230,7 +230,7 @@ describe('Backup/Restore Module', () => {
     it('clears queue before restore', async () => {
       await restoreBackup(emptyBackup);
 
-      const { clearQueue } = require('@/db/sync/queue-repo');
+      const { clearQueue } = require('@/db/sync/queue');
       expect(clearQueue).toHaveBeenCalled();
     });
 
@@ -312,7 +312,7 @@ describe('Backup/Restore Module', () => {
 
       await restoreBackup(mockBackup);
 
-      const { enqueueChange } = require('@/db/sync/queue-repo');
+      const { enqueueChange } = require('@/db/sync/queue');
       expect(enqueueChange).toHaveBeenCalledTimes(2);
       expect(enqueueChange).toHaveBeenCalledWith(
         mockDb,

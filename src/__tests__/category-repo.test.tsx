@@ -17,7 +17,7 @@ jest.mock('@/db/database', () => ({
   nowIso: jest.fn(() => '2026-01-01T00:00:00.000Z'),
 }));
 
-jest.mock('@/db/sync/queue-repo', () => ({
+jest.mock('@/db/sync/queue', () => ({
   enqueueChange: jest.fn(),
 }));
 
@@ -41,7 +41,7 @@ describe('Category repo', () => {
     const insert = mockDb.runAsync.mock.calls[0];
     expect(insert[0]).toContain('INSERT INTO categories');
     expect(insert[4]).toBe('Groceries');
-    const { enqueueChange } = require('@/db/sync/queue-repo');
+    const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ table: 'categories', operation: 'insert' })
@@ -56,7 +56,7 @@ describe('Category repo', () => {
     const update = mockDb.runAsync.mock.calls[0];
     expect(update[0]).toContain('UPDATE categories SET name');
     expect(update[1]).toBe('Snacks');
-    const { enqueueChange } = require('@/db/sync/queue-repo');
+    const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -73,7 +73,7 @@ describe('Category repo', () => {
     await deleteCategory(3);
 
     expect(mockDb.runAsync.mock.calls[0][0]).toContain('DELETE FROM categories');
-    const { enqueueChange } = require('@/db/sync/queue-repo');
+    const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

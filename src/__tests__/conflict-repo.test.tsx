@@ -22,7 +22,7 @@ jest.mock('@/db/database', () => ({
   nowIso: jest.fn(() => '2026-01-02T00:00:00.000Z'),
 }));
 
-jest.mock('@/db/sync/queue-repo', () => ({
+jest.mock('@/db/sync/queue', () => ({
   enqueueChange: jest.fn().mockResolvedValue(undefined),
 }));
 
@@ -133,10 +133,12 @@ describe('Conflict repo', () => {
     expect(update[0]).toContain('updated_at = ?');
     expect(update).toContain('2026-01-02T00:00:00.000Z');
 
-    const { enqueueChange } = require('@/db/sync/queue-repo');
+    const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ table: 'accounts', operation: 'update', recordUuid: 'u1' })
+      'accounts',
+      'u1',
+      'update'
     );
 
     const resolve = mockDb.runAsync.mock.calls.find(([sql]) =>

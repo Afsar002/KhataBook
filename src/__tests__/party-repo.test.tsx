@@ -25,7 +25,7 @@ jest.mock('@/db/database', () => ({
   nowIso: jest.fn(() => '2026-01-01T00:00:00.000Z'),
 }));
 
-jest.mock('@/db/sync/queue-repo', () => ({
+jest.mock('@/db/sync/queue', () => ({
   enqueueChange: jest.fn(),
 }));
 
@@ -54,7 +54,7 @@ describe('Party repo — opening balances', () => {
     expect(insert[0]).toContain('opening_balance');
     expect(insert[4]).toBe('Ramesh Store');
     expect(insert[7]).toBe(2500);
-    const { enqueueChange } = require('@/db/sync/queue-repo');
+    const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -82,7 +82,7 @@ describe('Party repo — opening balances', () => {
     expect(update[0]).toContain('opening_balance');
     expect(update[1]).toBe('New Name');
     expect(update[3]).toBe(500);
-    const { enqueueChange } = require('@/db/sync/queue-repo');
+    const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

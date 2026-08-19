@@ -6,7 +6,7 @@
  */
 import { getDatabase, nowIso } from '@/db/database';
 import { getCurrentUserId } from '@/services/supabase/auth';
-import { emitRecurringChanged } from '@/services/sync/events';
+import { emitRemoteWake } from '@/services/sync/events';
 import { uuid } from '@/utils/uuid';
 import type { SQLiteBindValue } from 'expo-sqlite';
 import type {

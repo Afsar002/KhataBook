@@ -20,7 +20,7 @@ jest.mock('@/db/database', () => ({
   getDatabase: jest.fn(),
 }));
 
-jest.mock('@/db/sync/queue-repo', () => ({
+jest.mock('@/db/sync/queue', () => ({
   enqueueChange: jest.fn(),
 }));
 

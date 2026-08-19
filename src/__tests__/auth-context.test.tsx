@@ -31,7 +31,7 @@ jest.mock('@/services/supabase/config', () => ({
   isSyncConfigured: jest.fn(() => true),
 }));
 
-jest.mock('@/services/sync/sync-engine', () => ({
+jest.mock('@/services/sync/engine', () => ({
   onAuthChanged: jest.fn().mockResolvedValue(undefined),
 }));
 

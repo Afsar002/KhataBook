@@ -19,7 +19,7 @@ jest.mock('@/db/database', () => ({
   nowIso: jest.fn(() => '2026-02-01T00:00:00.000Z'),
 }));
 
-jest.mock('@/db/sync/queue-repo', () => ({
+jest.mock('@/db/sync/queue', () => ({
   enqueueChange: jest.fn(),
 }));
 
@@ -100,7 +100,7 @@ describe('Edit/delete entry repos — get + update', () => {
       expect(update[8]).toBe('normal'); // kind (v8 column)
       expect(update[9]).toBe('[]'); // attachments JSON (v12 column)
       expect(update[10]).toBe(7); // WHERE id
-      const { enqueueChange } = require('@/db/sync/queue-repo');
+      const { enqueueChange } = require('@/db/sync/queue');
       expect(enqueueChange).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
@@ -164,7 +164,7 @@ describe('Edit/delete entry repos — get + update', () => {
       expect(update[2]).toBe(1);
       expect(update[4]).toBe(700);
       expect(update[7]).toBe(3); // WHERE id
-      const { enqueueChange } = require('@/db/sync/queue-repo');
+      const { enqueueChange } = require('@/db/sync/queue');
       expect(enqueueChange).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
@@ -240,7 +240,7 @@ describe('Edit/delete entry repos — get + update', () => {
       expect(update[7]).toBe('normal'); // kind (v8 column)
       expect(update[8]).toBe('[]'); // attachments JSON (v12 column)
       expect(update[9]).toBe(4); // WHERE id
-      const { enqueueChange } = require('@/db/sync/queue-repo');
+      const { enqueueChange } = require('@/db/sync/queue');
       expect(enqueueChange).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
