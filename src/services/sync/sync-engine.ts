@@ -268,6 +268,10 @@ async function runSync(
     // Let listeners (e.g. sync-outcome notifications) react to the finished run.
     emitSyncResult(lastResult);
 
+    // Release the running flag BEFORE setting the terminal status, so the
+    // onStatusChange listener sees isSyncing() === false and resets the UI.
+    running = false;
+
     if (pushResult.failed === 0) {
       // Stamp this device's name into the synced settings so other devices
       // show "Last Sync from <name>". Guarded so an unchanged name doesn't
@@ -291,6 +295,7 @@ async function runSync(
     }
     return lastResult;
   } catch (error) {
+    running = false;
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error(`[Sync Engine Error] source=${source} error=${errMsg}`);
     setStatus('error');
@@ -301,8 +306,6 @@ async function runSync(
       throw error;
     }
     return null;
-  } finally {
-    running = false;
   }
 }
 
