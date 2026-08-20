@@ -335,6 +335,7 @@ async function runSync(
   setState('syncing');
 
   const userId = session.user.id;
+  console.log('[Sync] userId for push:', userId, 'session:', !!session.access_token);
 
   try {
     const pushResult = await pushPendingChanges(supabase, userId);

@@ -91,6 +91,7 @@ export async function pushPendingChanges(
             ...row,
             user_id: userId,
           };
+          console.log('[Push] Sending payload:', JSON.stringify(sentPayload, null, 2));
           const { error } = await supabase
             .from(entry.tableName)
             .upsert(sentPayload, { onConflict: 'id' });
@@ -104,13 +105,14 @@ export async function pushPendingChanges(
     } catch (error) {
       if (isAuthError(error)) {
         result.authError = true;
+        console.error('[Push] Auth error:', error);
         return result; // stop — the session needs refreshing/re-auth
       }
 
       const { code, message } = extractErrorDetails(error);
 
       console.error(`[Sync Push Failed] table=${entry.tableName} uuid=${entry.recordUuid} operation=${entry.operation}`);
-      console.error(`[Sync Push Failed] Supabase error:`, { code, message });
+      console.error(`[Sync Push Failed] Supabase error:`, { code, message, fullError: error });
       console.error(`[Sync Push Failed] Payload sent: ${JSON.stringify(sentPayload, null, 2)}`);
       console.error(`[Sync Push Failed] Queued payload snapshot: ${entry.payload}`);
 

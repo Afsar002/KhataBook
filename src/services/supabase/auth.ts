@@ -74,8 +74,12 @@ export async function restoreSession(): Promise<Session | null> {
     return null;
   }
   const { data } = await supabase.auth.getSession();
+  console.log('[Auth] Restored session user:', data.session?.user?.id, 'has token:', !!data.session?.access_token);
   setSession(data.session);
-  supabase.auth.onAuthStateChange((_event, session) => setSession(session));
+  supabase.auth.onAuthStateChange((event, session) => {
+    console.log('[Auth] State change:', event, 'user:', session?.user?.id, 'has token:', !!session?.access_token);
+    setSession(session);
+  });
   return data.session;
 }
 
