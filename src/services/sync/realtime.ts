@@ -134,6 +134,7 @@ function createController(): RealtimeController {
   return {
     async start(getClient: () => SupabaseClient | null = getSupabaseClient): Promise<void> {
       const supabase = getClient();
+      console.log('[Realtime] start() called, supabase:', !!supabase, 'channel:', !!channel, 'stopping:', stopping);
       if (!supabase || channel || stopping) {
         return;
       }

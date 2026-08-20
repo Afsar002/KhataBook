@@ -389,6 +389,8 @@ async function runSync(
       state: pushResult.failed === 0 ? 'idle' : 'error',
     });
 
+    console.log(`[Sync Engine] Sync complete: pushed=${pushResult.pushed} deleted=${pushResult.deleted} pulled=${pullResult.inserted + pullResult.updated} inserted=${pullResult.inserted} updated=${pullResult.updated} skipped=${pullResult.skipped} failed=${pushResult.failed}`);
+
     // Stamp this device's name into the synced settings so other devices
     // show "Last Sync from <name>". Guarded so an unchanged name doesn't
     // re-enqueue (which would schedule another sync run).
@@ -527,6 +529,7 @@ export async function onAuthChanged(
     await setMeta(CURRENT_USER_KEY, session.user.id);
 
     // Listen for changes made on other devices while signed in.
+    console.log('[Sync Engine] Auth changed - starting realtime...');
     await realtime.stop(getClient);
     await realtime.start(getClient);
     // Note: realtime mode will be updated via the onModeChange listener

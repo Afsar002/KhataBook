@@ -25,7 +25,7 @@ import {
   FolderOpen,
 } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { Card } from '@/components/card';
 import { Chip } from '@/components/chip';
@@ -53,6 +53,7 @@ import { countUnresolvedConflicts } from '@/db/sync/conflict-repo';
 import { listSyncEvents } from '@/db/sync/history-repo';
 import { listSyncedDevices } from '@/db/sync/device-repo';
 import { countFailed, countPending, retryAll } from '@/db/sync/queue';
+import { resetSyncMeta } from '@/db/sync/meta';
 import { useLastSyncFrom } from '@/hooks/use-last-sync-from';
 import { useTheme } from '@/hooks/use-theme';
 import { authenticateWithDevice, hasDeviceCredentials } from '@/services/app-lock/auth';
@@ -468,6 +469,30 @@ function CloudSyncCard() {
           height={56}
         />
       ) : null}
+
+      <LargeButton
+        title="Force Full Re-download"
+        subtitle="Clear pull cursors and re-fetch all cloud data"
+        icon={Download}
+        onPress={async () => {
+          const confirmed = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              'Force Full Re-download',
+              'This will clear all local pull cursors and re-download all data from the cloud. Any unsynced local changes will be overwritten by the cloud versions. Continue?',
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Re-download', style: 'destructive', onPress: () => resolve(true) },
+              ]
+            );
+          });
+          if (!confirmed) return;
+          impact('heavy');
+          await resetSyncMeta();
+          void runNow(); // triggers a fresh pull with empty cursors
+        }}
+        variant="outline"
+        height={56}
+      />
 
       <ThemedText type="smallBold" themeColor="textSecondary" style={styles.cloudNote}>
         Device name
