@@ -340,7 +340,9 @@ async function runSync(
   console.log('[Sync] userId for push:', userId, 'session:', !!session.access_token);
 
   try {
+    console.log('[Sync Engine] runSync - starting push...');
     const pushResult = await pushPendingChanges(supabase, userId);
+    console.log('[Sync Engine] runSync - push complete:', { pushed: pushResult.pushed, deleted: pushResult.deleted, failed: pushResult.failed, authError: pushResult.authError });
     if (pushResult.authError) {
       setState('idle');
       // Still record the sync attempt timestamp so "Last sync" isn't "Never"
@@ -349,10 +351,14 @@ async function runSync(
       return null; // token expired — re-auth resumes syncing
     }
 
+    console.log('[Sync Engine] runSync - starting pull...');
     const pullResult = await pullRemoteChanges(supabase, userId);
+    console.log('[Sync Engine] runSync - pull complete:', { inserted: pullResult.inserted, updated: pullResult.updated, deleted: pullResult.deleted, skipped: pullResult.skipped, conflicts: pullResult.conflicts, errors: pullResult.errors.length });
 
+    console.log('[Sync Engine] runSync - writing LAST_SYNC_KEY...');
     await setMeta(LAST_SYNC_KEY, now);
-    console.log('[Sync Engine] Set LAST_SYNC_KEY to:', now);
+    const verifyRead = await getMeta(LAST_SYNC_KEY);
+    console.log('[Sync Engine] Set LAST_SYNC_KEY to:', now, '| verify read back:', verifyRead);
     if (pushResult.failed === 0) {
       await setMeta(LAST_SUCCESS_KEY, now);
       console.log('[Sync Engine] Set LAST_SUCCESS_KEY to:', now);
@@ -424,7 +430,8 @@ async function runSync(
 
     // Record the sync attempt timestamp even on unexpected errors
     await setMeta(LAST_SYNC_KEY, now);
-    console.log('[Sync Engine] Set LAST_SYNC_KEY on error to:', now);
+    const verifyErrorRead = await getMeta(LAST_SYNC_KEY);
+    console.log('[Sync Engine] Set LAST_SYNC_KEY on error to:', now, '| verify read back:', verifyErrorRead);
     updateStatus({
       lastSyncAt: now,
       state: 'error'
