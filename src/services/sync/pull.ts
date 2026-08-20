@@ -159,7 +159,16 @@ export async function pullRemoteChanges(
       result.errors.push({ table, uuid: '', operation: 'pull', code, message });
       continue; // continue with next table
     }
-    const uuidToId = await loadUuidToIdMap(table);
+
+    // Build uuid→id maps for ALL parent tables this table references
+    // (not just the current table). These are needed by toLocalRow() to
+    // resolve cloud FK uuids to local integer ids.
+    const parentTables = [...new Set(Object.values(spec.fks))];
+    const uuidToId: Record<string, number> = {};
+    for (const parentTable of parentTables) {
+      const parentMap = await loadUuidToIdMap(parentTable);
+      Object.assign(uuidToId, parentMap);
+    }
     console.log(`[Sync Pull] table=${table} cursor=${cursor} uuidToIdKeys=${Object.keys(uuidToId).length} rowsToProcess=${remoteRows.length}`);
 
     let lastUpdatedAt = cursor;
