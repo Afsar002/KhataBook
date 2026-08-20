@@ -74,12 +74,7 @@ export async function addTransaction(tx: NewTransaction): Promise<number> {
     kind,
     JSON.stringify(tx.attachments ?? [])
   );
-  await enqueueChange(db, {
-    table: 'transactions',
-    operation: 'insert',
-    recordUuid,
-    payload: { type: tx.type, amount: tx.amount, kind },
-  });
+  await enqueueChange(db, 'transactions', recordUuid, 'insert', { type: tx.type, amount: tx.amount, kind });
   return result.lastInsertRowId;
 }
 
@@ -150,11 +145,7 @@ export async function updateTransaction(
       id
     );
     if (row?.uuid) {
-      await enqueueChange(db, {
-        table: 'transactions',
-        operation: 'update',
-        recordUuid: row.uuid,
-      });
+      await enqueueChange(db, 'transactions', row.uuid, 'update');
     }
   });
 }
@@ -172,7 +163,7 @@ export async function deleteTransaction(id: number): Promise<void> {
     }
     await db.runAsync('DELETE FROM transactions WHERE id = ?', id);
     if (row?.uuid) {
-      await enqueueChange(db, { table: 'transactions', operation: 'delete', recordUuid: row.uuid });
+      await enqueueChange(db, 'transactions', row.uuid, 'delete');
     }
   });
 }

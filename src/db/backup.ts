@@ -194,7 +194,7 @@ export async function restoreBackup(file: BackupFile): Promise<RestoreResult> {
           typeof row.uuid === 'string' && row.uuid.length > 0 ? row.uuid : uuid();
         values.push(recordUuid, now);
         await db.runAsync(sql, ...values);
-        await enqueueChange(db, { table, operation: 'insert', recordUuid, payload: null });
+        await enqueueChange(db, table, recordUuid, 'insert', null);
       }
     }
   });

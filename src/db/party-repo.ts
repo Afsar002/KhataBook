@@ -79,26 +79,16 @@ export async function addParty(party: NewParty): Promise<number> {
         openingDate,
         now
       );
-      await enqueueChange(db, {
-        table: 'party_transactions',
-        operation: 'insert',
-        recordUuid: entryUuid,
-        payload: { partyId, direction, amount: openingBalance, kind: 'opening' },
-      });
+      await enqueueChange(db, 'party_transactions', entryUuid, 'insert', { partyId, direction, amount: openingBalance, kind: 'opening' });
     }
   });
 
-  await enqueueChange(db, {
-    table: 'parties',
-    operation: 'insert',
-    recordUuid,
-    payload: {
+  await enqueueChange(db, 'parties', recordUuid, 'insert', {
       name: party.name.trim(),
       type: party.type,
       phone: party.phone.trim(),
       opening_balance: openingBalance,
-    },
-  });
+    });
   return partyId;
 }
 
@@ -147,11 +137,7 @@ export async function updateParty(
           existing.id
         );
         if (existing.uuid) {
-          await enqueueChange(db, {
-            table: 'party_transactions',
-            operation: 'update',
-            recordUuid: existing.uuid,
-          });
+          await enqueueChange(db, 'party_transactions', existing.uuid, 'update');
         }
       } else {
         const entryUuid = uuid();
@@ -171,36 +157,22 @@ export async function updateParty(
           openingDate,
           now
         );
-        await enqueueChange(db, {
-          table: 'party_transactions',
-          operation: 'insert',
-          recordUuid: entryUuid,
-          payload: { partyId: id, direction: dir, amount: input.openingBalance, kind: 'opening' },
-        });
+        await enqueueChange(db, 'party_transactions', entryUuid, 'insert', { partyId: id, direction: dir, amount: input.openingBalance, kind: 'opening' });
       }
     } else if (existing) {
       // Opening balance set to zero → remove the opening entry.
       await db.runAsync('DELETE FROM party_transactions WHERE id = ?', existing.id);
       if (existing.uuid) {
-        await enqueueChange(db, {
-          table: 'party_transactions',
-          operation: 'delete',
-          recordUuid: existing.uuid,
-        });
+        await enqueueChange(db, 'party_transactions', existing.uuid, 'delete');
       }
     }
 
     if (row?.uuid) {
-      await enqueueChange(db, {
-        table: 'parties',
-        operation: 'update',
-        recordUuid: row.uuid,
-        payload: {
+      await enqueueChange(db, 'parties', row.uuid, 'update', {
           name: input.name.trim(),
           phone: input.phone.trim(),
           opening_balance: input.openingBalance,
-        },
-      });
+        });
     }
   });
 }
@@ -214,11 +186,7 @@ export async function deleteParty(id: number): Promise<void> {
       id
     );
     for (const child of children) {
-      await enqueueChange(db, {
-        table: 'party_transactions',
-        operation: 'delete',
-        recordUuid: child.uuid,
-      });
+      await enqueueChange(db, 'party_transactions', child.uuid, 'delete');
     }
     const row = await db.getFirstAsync<{ uuid: string }>(
       'SELECT uuid FROM parties WHERE id = ?',
@@ -227,7 +195,7 @@ export async function deleteParty(id: number): Promise<void> {
     await db.runAsync('DELETE FROM party_transactions WHERE party_id = ?', id);
     await db.runAsync('DELETE FROM parties WHERE id = ?', id);
     if (row?.uuid) {
-      await enqueueChange(db, { table: 'parties', operation: 'delete', recordUuid: row.uuid });
+      await enqueueChange(db, 'parties', row.uuid, 'delete');
     }
   });
 }
@@ -404,12 +372,7 @@ export async function addPartyTransaction(tx: NewPartyTransaction): Promise<numb
     kind,
     JSON.stringify(tx.attachments ?? [])
   );
-  await enqueueChange(db, {
-    table: 'party_transactions',
-    operation: 'insert',
-    recordUuid,
-    payload: { partyId: tx.partyId, direction: tx.direction, amount: tx.amount, kind },
-  });
+  await enqueueChange(db, 'party_transactions', recordUuid, 'insert', { partyId: tx.partyId, direction: tx.direction, amount: tx.amount, kind });
   return result.lastInsertRowId;
 }
 
@@ -463,11 +426,7 @@ export async function updatePartyTransaction(
       id
     );
     if (row?.uuid) {
-      await enqueueChange(db, {
-        table: 'party_transactions',
-        operation: 'update',
-        recordUuid: row.uuid,
-      });
+      await enqueueChange(db, 'party_transactions', row.uuid, 'update');
     }
   });
 }
@@ -485,11 +444,7 @@ export async function deletePartyTransaction(id: number): Promise<void> {
     }
     await db.runAsync('DELETE FROM party_transactions WHERE id = ?', id);
     if (row?.uuid) {
-      await enqueueChange(db, {
-        table: 'party_transactions',
-        operation: 'delete',
-        recordUuid: row.uuid,
-      });
+      await enqueueChange(db, 'party_transactions', row.uuid, 'delete');
     }
   });
 }

@@ -29,12 +29,7 @@ export async function setSetting(key: string, value: string): Promise<void> {
         now,
         existing.id
       );
-      await enqueueChange(db, {
-        table: 'settings',
-        operation: 'update',
-        recordUuid: existing.uuid ?? uuid(), // fallback generates new uuid if somehow missing
-        payload: { value },
-      });
+      await enqueueChange(db, 'settings', existing.uuid ?? uuid(), 'update', { value });
     } else {
       // Insert new setting with generated uuid
       const recordUuid = uuid();
@@ -46,12 +41,7 @@ export async function setSetting(key: string, value: string): Promise<void> {
         key,
         value
       );
-      await enqueueChange(db, {
-        table: 'settings',
-        operation: 'insert',
-        recordUuid,
-        payload: { value },
-      });
+      await enqueueChange(db, 'settings', recordUuid, 'insert', { value });
     }
   });
 }

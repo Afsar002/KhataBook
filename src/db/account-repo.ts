@@ -180,21 +180,11 @@ export async function addAccount(input: NewAccount): Promise<number> {
         openingDate,
         now
       );
-      await enqueueChange(db, {
-        table: 'transactions',
-        operation: 'insert',
-        recordUuid: entryUuid,
-        payload: { type: 'income', amount: openingBalance, kind: 'opening' },
-      });
+      await enqueueChange(db, 'transactions', entryUuid, 'insert', { type: 'income', amount: openingBalance, kind: 'opening' });
     }
   });
 
-  await enqueueChange(db, {
-    table: 'accounts',
-    operation: 'insert',
-    recordUuid,
-    payload: { name: input.name.trim(), type: input.type },
-  });
+  await enqueueChange(db, 'accounts', recordUuid, 'insert', { name: input.name.trim(), type: input.type });
   return accountId;
 }
 
@@ -213,7 +203,7 @@ export async function renameAccount(id: number, name: string): Promise<void> {
       id
     );
     if (row?.uuid) {
-      await enqueueChange(db, { table: 'accounts', operation: 'update', recordUuid: row.uuid });
+      await enqueueChange(db, 'accounts', row.uuid, 'update');
     }
   });
 }
@@ -240,7 +230,7 @@ export async function deleteAccount(id: number): Promise<boolean> {
     );
     await db.runAsync('DELETE FROM accounts WHERE id = ?', id);
     if (row?.uuid) {
-      await enqueueChange(db, { table: 'accounts', operation: 'delete', recordUuid: row.uuid });
+      await enqueueChange(db, 'accounts', row.uuid, 'delete');
     }
   });
   return true;

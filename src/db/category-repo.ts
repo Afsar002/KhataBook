@@ -52,12 +52,7 @@ export async function addCategory(input: NewCategory): Promise<number> {
     input.icon,
     orderRow?.next ?? 0
   );
-  await enqueueChange(db, {
-    table: 'categories',
-    operation: 'insert',
-    recordUuid,
-    payload: { name, type: input.type, icon: input.icon },
-  });
+  await enqueueChange(db, 'categories', recordUuid, 'insert', { name, type: input.type, icon: input.icon });
   return result.lastInsertRowId;
 }
 
@@ -80,12 +75,7 @@ export async function updateCategory(
       id
     );
     if (row?.uuid) {
-      await enqueueChange(db, {
-        table: 'categories',
-        operation: 'update',
-        recordUuid: row.uuid,
-        payload: { name, icon: input.icon },
-      });
+      await enqueueChange(db, 'categories', row.uuid, 'update', { name, icon: input.icon });
     }
   });
 }
@@ -103,11 +93,7 @@ export async function deleteCategory(id: number): Promise<void> {
     );
     await db.runAsync('DELETE FROM categories WHERE id = ?', id);
     if (row?.uuid) {
-      await enqueueChange(db, {
-        table: 'categories',
-        operation: 'delete',
-        recordUuid: row.uuid,
-      });
+      await enqueueChange(db, 'categories', row.uuid, 'delete');
     }
   });
 }

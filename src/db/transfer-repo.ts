@@ -30,12 +30,7 @@ export async function addTransfer(tx: NewTransfer): Promise<number> {
     tx.date,
     time
   );
-  await enqueueChange(db, {
-    table: 'transfers',
-    operation: 'insert',
-    recordUuid,
-    payload: { fromAccountId: tx.fromAccountId, toAccountId: tx.toAccountId, amount: tx.amount },
-  });
+  await enqueueChange(db, 'transfers', recordUuid, 'insert', { fromAccountId: tx.fromAccountId, toAccountId: tx.toAccountId, amount: tx.amount });
   return result.lastInsertRowId;
 }
 
@@ -90,11 +85,7 @@ export async function updateTransfer(id: number, input: NewTransfer): Promise<vo
       id
     );
     if (row?.uuid) {
-      await enqueueChange(db, {
-        table: 'transfers',
-        operation: 'update',
-        recordUuid: row.uuid,
-      });
+      await enqueueChange(db, 'transfers', row.uuid, 'update');
     }
   });
 }
@@ -108,7 +99,7 @@ export async function deleteTransfer(id: number): Promise<void> {
     );
     await db.runAsync('DELETE FROM transfers WHERE id = ?', id);
     if (row?.uuid) {
-      await enqueueChange(db, { table: 'transfers', operation: 'delete', recordUuid: row.uuid });
+      await enqueueChange(db, 'transfers', row.uuid, 'delete');
     }
   });
 }
