@@ -54,6 +54,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     void initSyncState(getSupabaseClient);
 
     const unsubscribeStatus = onStatusChange((nextStatus) => {
+      console.log('[Sync Context] onStatusChange:', { state: nextStatus.state, lastSyncAt: nextStatus.lastSyncAt });
       setStatus(nextStatus);
       setSyncing(nextStatus.state === 'syncing');
     });

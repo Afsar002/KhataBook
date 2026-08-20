@@ -175,6 +175,7 @@ function CloudSyncCard() {
     runNow,
   } = useSync();
   const lastSyncAt = status.lastSyncAt;
+  console.log('[Settings CloudSyncCard] lastSyncAt from context:', lastSyncAt, 'status:', status.state, 'syncing:', syncing);
   const lastSyncFrom = useLastSyncFrom();
   const [deviceName, setDeviceNameState] = useState('');
   const [deviceBusy, setDeviceBusy] = useState(false);

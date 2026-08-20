@@ -117,6 +117,7 @@ function updateStatus(partial: Partial<SyncStatus>): void {
   let changed = false;
   for (const [key, value] of Object.entries(partial)) {
     if (status[key as keyof SyncStatus] !== value) {
+      console.log(`[Sync Engine] updateStatus: ${key} = ${status[key as keyof SyncStatus]} -> ${value}`);
       (status as Record<string, unknown>)[key] = value;
       changed = true;
     }
