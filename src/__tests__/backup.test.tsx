@@ -11,10 +11,32 @@ import {
  * Mock dependencies. `getDatabase` is a jest.fn whose return value is set in
  * beforeEach to a shared singleton mock, so per-test `mockResolvedValue` calls
  * apply to the exact instance the module under test uses.
+ *
+ * The restore implementation uses prepared statements (prepareAsync /
+ * executeAsync / finalizeAsync) wrapped in a transaction. The mock tracks
+ * prepared-statement executions so we can assert the inserted values.
  */
+const insertLog: { sql: string; values: any[] }[] = [];
+
+const mockStatement = {
+  executeAsync: jest.fn(async (...values: any[]) => {
+    // Reconstruct the SQL + values from the prepare call context.
+    insertLog.push({ sql: lastPreparedSql, values });
+    return { lastInsertRowId: 1, changes: 1 };
+  }),
+  finalizeAsync: jest.fn().mockResolvedValue(undefined),
+};
+
+let lastPreparedSql = '';
+
 const mockDb = {
   getAllAsync: jest.fn().mockResolvedValue([]),
   runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
+  prepareAsync: jest.fn(async (sql: string) => {
+    lastPreparedSql = sql;
+    return mockStatement;
+  }),
+  getFirstAsync: jest.fn().mockResolvedValue(null),
   withTransactionAsync: jest.fn((fn: () => Promise<void>) => fn()),
 };
 
@@ -40,6 +62,10 @@ jest.mock('@/services/app-meta', () => ({
   }),
 }));
 
+jest.mock('@/services/supabase/auth', () => ({
+  getCurrentSession: jest.fn().mockReturnValue(null),
+}));
+
 const emptyBackup: BackupFile = {
   app: 'dailykhata',
   version: 2,
@@ -58,6 +84,7 @@ const emptyBackup: BackupFile = {
 describe('Backup/Restore Module', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    insertLog.length = 0;
     const { getDatabase } = require('@/db/database');
     getDatabase.mockReturnValue(mockDb);
   });
@@ -234,7 +261,7 @@ describe('Backup/Restore Module', () => {
       expect(clearQueue).toHaveBeenCalled();
     });
 
-    it('inserts rows with fresh timestamps', async () => {
+    it('inserts rows with fresh timestamps and uuid in sync columns', async () => {
       const mockBackup: BackupFile = {
         ...emptyBackup,
         tables: {
@@ -247,15 +274,14 @@ describe('Backup/Restore Module', () => {
 
       await restoreBackup(mockBackup);
 
-      // Should insert with uuid and updated_at
-      const insertCalls = mockDb.runAsync.mock.calls
-        .filter((call: any[]) => call[0].startsWith('INSERT INTO accounts'));
-
+      const insertCalls = insertLog.filter((entry) => entry.sql.includes('INSERT OR REPLACE INTO accounts'));
       expect(insertCalls.length).toBe(1);
-      // Last two args should be uuid and nowIso
-      const values = insertCalls[0].slice(1);
-      expect(values[values.length - 2]).toMatch(/^test-uuid-/); // uuid
-      expect(values[values.length - 1]).toBe('2026-08-05T12:00:00.000Z'); // now
+
+      const values = insertCalls[0].values;
+      // Column order: id, name, type, opening_balance, sort_order, created_at, uuid, user_id, updated_at, deleted_at, version
+      const uuidIndex = TABLE_COLUMNS.accounts.length; // 6 data cols, uuid at index 6
+      expect(values[uuidIndex]).toMatch(/^test-uuid-/); // uuid
+      expect(values[uuidIndex + 2]).toBe('2026-08-05T12:00:00.000Z'); // updated_at
     });
 
     it('preserves uuid from backup when present', async () => {
@@ -271,11 +297,9 @@ describe('Backup/Restore Module', () => {
 
       await restoreBackup(mockBackup);
 
-      const insertCalls = mockDb.runAsync.mock.calls
-        .filter((call: any[]) => call[0].startsWith('INSERT INTO accounts'));
-
-      const values = insertCalls[0].slice(1);
-      expect(values[values.length - 2]).toBe('backup-uuid-123');
+      const insertCalls = insertLog.filter((entry) => entry.sql.includes('INSERT OR REPLACE INTO accounts'));
+      const uuidIndex = TABLE_COLUMNS.accounts.length;
+      expect(insertCalls[0].values[uuidIndex]).toBe('backup-uuid-123');
     });
 
     it('generates new uuid when backup has none', async () => {
@@ -291,11 +315,9 @@ describe('Backup/Restore Module', () => {
 
       await restoreBackup(mockBackup);
 
-      const insertCalls = mockDb.runAsync.mock.calls
-        .filter((call: any[]) => call[0].startsWith('INSERT INTO accounts'));
-
-      const values = insertCalls[0].slice(1);
-      expect(values[values.length - 2]).toMatch(/^test-uuid-/);
+      const insertCalls = insertLog.filter((entry) => entry.sql.includes('INSERT OR REPLACE INTO accounts'));
+      const uuidIndex = TABLE_COLUMNS.accounts.length;
+      expect(insertCalls[0].values[uuidIndex]).toMatch(/^test-uuid-/);
     });
 
     it('enqueues changes for each restored row', async () => {
@@ -365,6 +387,85 @@ describe('Backup/Restore Module', () => {
 
       expect(result.migrationNotice).toBeUndefined();
     });
+
+    it('sanitizes empty-string user_id to null on accounts', async () => {
+      const mockBackup: BackupFile = {
+        ...emptyBackup,
+        tables: {
+          ...emptyBackup.tables,
+          accounts: [
+            { id: 1, name: 'Cash', type: 'cash', opening_balance: 100, sort_order: 1, created_at: '2026-01-01', user_id: '' },
+          ],
+        },
+      };
+
+      await restoreBackup(mockBackup);
+
+      const insertCalls = insertLog.filter((entry) => entry.sql.includes('INSERT OR REPLACE INTO accounts'));
+      const userIdIndex = TABLE_COLUMNS.accounts.length + 1; // uuid is index 6, user_id is 7
+      expect(insertCalls[0].values[userIdIndex]).toBeNull();
+    });
+
+    it('sanitizes empty-string user_id to null on settings', async () => {
+      const mockBackup: BackupFile = {
+        ...emptyBackup,
+        tables: {
+          ...emptyBackup.tables,
+          settings: [
+            { key: 'theme', value: 'dark', user_id: '' },
+          ],
+        },
+      };
+
+      await restoreBackup(mockBackup);
+
+      const insertCalls = insertLog.filter((entry) => entry.sql.includes('INSERT OR REPLACE INTO settings'));
+      const userIdIndex = TABLE_COLUMNS.settings.length + 1; // key, value, uuid, user_id...
+      expect(insertCalls[0].values[userIdIndex]).toBeNull();
+    });
+
+    it('handles null category_id on transactions without crashing', async () => {
+      const mockBackup: BackupFile = {
+        ...emptyBackup,
+        tables: {
+          ...emptyBackup.tables,
+          categories: [
+            { id: 1, name: 'Other Expense', type: 'expense', icon: 'tag', sort_order: 1, created_at: '2026-01-01' },
+          ],
+          transactions: [
+            { id: 13, type: 'expense', amount: 50, account_id: 1, category_id: null, note: '', date: '2026-01-01' },
+          ],
+        },
+      };
+
+      const result = await restoreBackup(mockBackup);
+
+      expect(result.restored).toBe(true);
+      const insertCalls = insertLog.filter((entry) => entry.sql.includes('INSERT OR REPLACE INTO transactions'));
+      expect(insertCalls.length).toBe(1);
+      // category_id is at index 4 (id, type, amount, account_id, category_id)
+      expect(insertCalls[0].values[4]).toBeNull();
+    });
+
+    it('finalizes prepared statement on error', async () => {
+      mockStatement.executeAsync.mockRejectedValueOnce(new Error('INSERT failed'));
+
+      const mockBackup: BackupFile = {
+        ...emptyBackup,
+        tables: {
+          ...emptyBackup.tables,
+          accounts: [
+            { id: 1, name: 'Cash', type: 'cash', opening_balance: 100, sort_order: 1, created_at: '2026-01-01' },
+          ],
+        },
+      };
+
+      const result = await restoreBackup(mockBackup);
+
+      expect(result.restored).toBe(false);
+      expect(result.message).toContain('INSERT failed');
+      expect(mockStatement.finalizeAsync).toHaveBeenCalled();
+    });
   });
 
   describe('TABLE_COLUMNS', () => {
@@ -383,6 +484,16 @@ describe('Backup/Restore Module', () => {
       expect(TABLE_COLUMNS.transactions).toContain('account_id');
       expect(TABLE_COLUMNS.transactions).toContain('category_id');
       expect(TABLE_COLUMNS.party_transactions).toContain('party_id');
+    });
+
+    it('includes time/kind/attachments for transactions and transfers', () => {
+      expect(TABLE_COLUMNS.transactions).toContain('time');
+      expect(TABLE_COLUMNS.transactions).toContain('kind');
+      expect(TABLE_COLUMNS.transactions).toContain('attachments');
+      expect(TABLE_COLUMNS.transfers).toContain('time');
+      expect(TABLE_COLUMNS.party_transactions).toContain('time');
+      expect(TABLE_COLUMNS.party_transactions).toContain('kind');
+      expect(TABLE_COLUMNS.party_transactions).toContain('attachments');
     });
   });
 });
