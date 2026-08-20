@@ -28,6 +28,8 @@ interface SyncContextValue {
   lastResult: SyncResult | null;
   /** True while a sync run is in flight. */
   syncing: boolean;
+  /** Current realtime connection mode. */
+  realtimeMode: 'off' | 'connecting' | 'live' | 'degraded';
   /** Whether local edits auto-upload (off by default only if the user turns it off). */
   autoSync: boolean;
   setAutoSync: (value: boolean) => void;
@@ -88,6 +90,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       status,
       lastResult,
       syncing,
+      realtimeMode: status.realtimeMode,
       autoSync: status.autoSync,
       setAutoSync: handleSetAutoSync,
       wifiOnly: status.wifiOnly,

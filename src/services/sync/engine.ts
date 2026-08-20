@@ -163,6 +163,8 @@ export async function initSyncState(
 
   const lastSyncAt = await getMeta(LAST_SYNC_KEY);
   const lastSuccessAt = await getMeta(LAST_SUCCESS_KEY);
+  console.log('[Sync Engine] initSyncState - lastSyncAt from meta:', lastSyncAt);
+  console.log('[Sync Engine] initSyncState - lastSuccessAt from meta:', lastSuccessAt);
   const [autoSync, wifiOnly, intervalMinutes] = await Promise.all([
     getAutoSync(),
     getWifiOnlySync(),
@@ -350,8 +352,10 @@ async function runSync(
     const pullResult = await pullRemoteChanges(supabase, userId);
 
     await setMeta(LAST_SYNC_KEY, now);
+    console.log('[Sync Engine] Set LAST_SYNC_KEY to:', now);
     if (pushResult.failed === 0) {
       await setMeta(LAST_SUCCESS_KEY, now);
+      console.log('[Sync Engine] Set LAST_SUCCESS_KEY to:', now);
     }
 
     const result: SyncResult = {
@@ -420,6 +424,7 @@ async function runSync(
 
     // Record the sync attempt timestamp even on unexpected errors
     await setMeta(LAST_SYNC_KEY, now);
+    console.log('[Sync Engine] Set LAST_SYNC_KEY on error to:', now);
     updateStatus({
       lastSyncAt: now,
       state: 'error'
@@ -536,7 +541,9 @@ export async function onAuthChanged(
 
     // A fresh login downloads the user's data (automatic restore).
     // Don't throw on error — let the UI display it via lastResult
+    console.log('[Sync Engine] onAuthChanged - calling syncNow...');
     await syncNow('manual', getClient);
+    console.log('[Sync Engine] onAuthChanged - syncNow completed');
   } finally {
     resolveNext!();
   }

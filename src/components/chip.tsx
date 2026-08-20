@@ -13,27 +13,40 @@ type ChipProps = {
   onPress: () => void;
   icon?: ReactNode;
   style?: ViewStyle;
+  disabled?: boolean;
 };
 
-export function Chip({ label, selected, onPress, icon, style }: ChipProps) {
+export function Chip({ label, selected, onPress, icon, style, disabled = false }: ChipProps) {
   const theme = useTheme();
 
   const handlePress = () => {
-    impact('light');
-    onPress();
+    if (!disabled) {
+      impact('light');
+      onPress();
+    }
   };
 
   return (
     <Pressable
       onPress={handlePress}
+      disabled={disabled}
       accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled }}
       accessibilityLabel={label}
       style={({ pressed }) => [
         styles.chip,
         {
-          backgroundColor: selected ? theme.primary : theme.backgroundElement,
-          borderColor: selected ? theme.primary : theme.border,
+          backgroundColor: selected
+            ? theme.primary
+            : disabled
+              ? theme.backgroundElement
+              : theme.backgroundElement,
+          borderColor: selected
+            ? theme.primary
+            : disabled
+              ? theme.border
+              : theme.border,
+          opacity: disabled ? 0.5 : 1,
         },
         pressed && styles.pressed,
         style,
@@ -41,7 +54,16 @@ export function Chip({ label, selected, onPress, icon, style }: ChipProps) {
       {icon}
       <ThemedText
         type="smallBold"
-        style={[styles.label, { color: selected ? '#FFFFFF' : theme.text }]}
+        style={[
+          styles.label,
+          {
+            color: selected
+              ? '#FFFFFF'
+              : disabled
+                ? theme.textSecondary
+                : theme.text,
+          },
+        ]}
         numberOfLines={1}>
         {label}
       </ThemedText>

@@ -69,6 +69,21 @@ export async function setSyncIntervalMinutes(minutes: number): Promise<void> {
   await setMeta(SYNC_INTERVAL_KEY, String(Math.max(0, Math.floor(minutes))));
 }
 
+/** Persists the auto-sync preference (used by sync engine). */
+export async function persistAutoSync(enabled: boolean): Promise<void> {
+  await setAutoSync(enabled);
+}
+
+/** Persists the Wi-Fi-only preference (used by sync engine). */
+export async function persistWifiOnlySync(enabled: boolean): Promise<void> {
+  await setWifiOnlySync(enabled);
+}
+
+/** Persists the sync interval (used by sync engine). */
+export async function persistSyncIntervalMinutes(minutes: number): Promise<void> {
+  await setSyncIntervalMinutes(minutes);
+}
+
 /** Clears all sync state so the next pull is a full download. */
 export async function resetSyncMeta(): Promise<void> {
   const db = getDatabase();

@@ -76,9 +76,9 @@ function createController(): RealtimeController {
       config: {
         // Pin VSN 1.0.0 for React Native WebSocket compatibility
         // (VSN 2.0.0 uses binary ArrayBuffer frames that Android mishandles)
-        vsn: '1.0.0',
-      },
-    });
+        ...({ vsn: '1.0.0' } as Record<string, unknown>),
+      } as Record<string, unknown>,
+    } as Record<string, unknown>);
 
     for (const spec of SYNC_TABLES) {
       channel.on(

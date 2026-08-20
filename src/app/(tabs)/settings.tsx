@@ -62,6 +62,7 @@ import { getDeviceName, setDeviceName } from '@/services/device/device-name';
 import { impact } from '@/utils/haptics';
 import type { SyncDevice, SyncHistoryEntry } from '@/types';
 import type { SyncStatus } from '@/services/sync/engine';
+import type { SyncError } from '@/services/sync/events';
 import { todayISODate } from '@/utils/format';
 import { writeAndShareFile } from '@/utils/share';
 import { readFileFromDocuments } from '@/utils/file';
@@ -102,7 +103,7 @@ function CloudInfoRow({
 }
 
 /** Human label for the engine's sync status. */
-function syncStatusLabel(status: SyncStatus, syncing: boolean): string {
+function syncStatusLabel(status: SyncStatus, syncing: boolean, lastSyncAt: string | null): string {
   if (syncing) {
     return 'Syncing…';
   }
@@ -116,6 +117,10 @@ function syncStatusLabel(status: SyncStatus, syncing: boolean): string {
     case 'version_blocked':
       return 'Update required';
     default:
+      // If never synced, show "Needs initial sync" instead of "In sync"
+      if (!lastSyncAt) {
+        return 'Needs initial sync';
+      }
       return 'In sync';
   }
 }
@@ -159,7 +164,6 @@ function CloudSyncCard() {
   const { status: authStatus, account, signOut } = useAuth();
   const {
     status,
-    lastSyncAt,
     lastResult,
     syncing,
     autoSync,
@@ -170,6 +174,7 @@ function CloudSyncCard() {
     setIntervalMinutes,
     runNow,
   } = useSync();
+  const lastSyncAt = status.lastSyncAt;
   const lastSyncFrom = useLastSyncFrom();
   const [deviceName, setDeviceNameState] = useState('');
   const [deviceBusy, setDeviceBusy] = useState(false);
@@ -181,6 +186,7 @@ function CloudSyncCard() {
   const [historyEvents, setHistoryEvents] = useState<SyncHistoryEntry[]>([]);
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [syncedDevices, setSyncedDevices] = useState<SyncDevice[]>([]);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   useEffect(() => {
     getDeviceName().then(setDeviceNameState);
   }, []);
@@ -245,7 +251,7 @@ function CloudSyncCard() {
       feedback.toast({ message: 'No errors in last sync.', tone: 'info' });
       return;
     }
-    const errorLines = lastResult.errors.map((e) =>
+    const errorLines = lastResult.errors.map((e: SyncError) =>
       `${e.table} · ${e.operation} · ${e.code ?? 'N/A'}: ${e.message}`
     );
     feedback.alert({
@@ -310,330 +316,368 @@ function CloudSyncCard() {
     });
   };
 
+  const handleForceRedownload = async () => {
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        'Force Full Re-download',
+        'This will clear all local pull cursors and re-download all data from the cloud. Any unsynced local changes will be overwritten by the cloud versions. Continue?',
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Re-download', style: 'destructive', onPress: () => resolve(true) },
+        ]
+      );
+    });
+    if (!confirmed) return;
+    impact('heavy');
+    await resetSyncMeta();
+    void runNow(); // triggers a fresh pull with empty cursors
+  };
+
   return (
-    <Card style={styles.cloudCard}>
-      <View style={styles.row}>
-        <View style={[styles.icon, { backgroundColor: theme.incomeSoft }]}>
-          <Cloud size={22} color={theme.primary} />
+    <View style={styles.cloudSyncWrapper}>
+      {/* Card 1: Status */}
+      <Card style={styles.cloudCard}>
+        <View style={styles.cardHeader}>
+          <View style={[styles.icon, { backgroundColor: theme.incomeSoft }]}>
+            <Cloud size={22} color={theme.primary} />
+          </View>
+          <View style={styles.rowLabel}>
+            <ThemedText type="default">Cloud Sync Status</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {syncing ? 'Syncing now…' : status.autoSync ? 'Automatic backups on' : 'Auto sync off'}
+            </ThemedText>
+          </View>
         </View>
-        <View style={styles.rowLabel}>
-          <ThemedText type="default">Cloud Sync</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {syncing ? 'Syncing now…' : status.autoSync ? 'Automatic backups on' : 'Auto sync off'}
-          </ThemedText>
-        </View>
-      </View>
 
-      <View style={[styles.cloudDivider, { backgroundColor: theme.border }]} />
+        <View style={[styles.cloudDivider, { backgroundColor: theme.border }]} />
 
-      <CloudInfoRow label="Connected Account" value={account} />
-      <CloudInfoRow label="Last Sync" value={formatLastSync(lastSyncAt)} />
-      <CloudInfoRow label="Sync Status" value={syncStatusLabel(status, syncing)} />
-      <CloudInfoRow
-        label="Live Sync"
-        value={
-          status.realtimeMode === 'live' ? 'Live' : status.realtimeMode === 'degraded' ? 'Reconnecting…' : 'Off'
-        }
-        dotColor={
-          status.realtimeMode === 'live' ? theme.income : status.realtimeMode === 'degraded' ? theme.warning : theme.border
-        }
-      />
-      {lastSyncFrom ? <CloudInfoRow label="From Device" value={lastSyncFrom} /> : null}
-
-      {lastResult && lastResult.conflicts > 0 ? (
-        <View style={[styles.conflictBanner, { backgroundColor: theme.expenseSoft }]}>
-          <AlertTriangle size={16} color={theme.danger} />
-          <ThemedText type="small" themeColor="danger" style={styles.conflictText}>
-            {lastResult.conflicts === 1
-              ? '1 local change was overwritten by a newer version from the cloud.'
-              : `${lastResult.conflicts} local changes were overwritten by newer versions from the cloud.`}
-          </ThemedText>
-        </View>
-      ) : null}
-
-      <Pressable
-        onPress={() => {
-          impact('light');
-          router.push('/conflicts');
-        }}
-        accessibilityRole="button"
-        accessibilityLabel="Review sync conflicts"
-        style={styles.row}>
-        <View style={styles.rowLabel}>
-          <ThemedText type="default">Conflicts</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {conflictCount === 0
-              ? 'No unsynced changes were overwritten'
-              : `${conflictCount} local ${conflictCount === 1 ? 'change was' : 'changes were'} overwritten — review & restore`}
-          </ThemedText>
-        </View>
-        <ChevronRight size={18} color={theme.textSecondary} />
-      </Pressable>
-
-      <LargeButton
-        title="Sync Now"
-        subtitle="Upload & download the latest"
-        icon={RefreshCw}
-        onPress={() => {
-          impact('medium');
-          void runNow();
-        }}
-        variant="outline"
-        height={64}
-        disabled={syncing}
-      />
-
-      <View style={styles.row}>
-        <View style={styles.rowLabel}>
-          <ThemedText type="default">Auto Sync</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            Back up changes automatically
-          </ThemedText>
-        </View>
-        <Switch
-          value={autoSync}
-          onValueChange={setAutoSync}
-          trackColor={{ true: theme.primary, false: theme.border }}
-          thumbColor="#FFFFFF"
-          accessibilityLabel="Auto sync"
+        <CloudInfoRow label="Connected Account" value={account} />
+        <CloudInfoRow label="Last Sync" value={formatLastSync(lastSyncAt)} />
+        <CloudInfoRow label="Sync Status" value={syncStatusLabel(status, syncing, lastSyncAt)} />
+        <CloudInfoRow
+          label="Live Sync"
+          value={
+            status.realtimeMode === 'live' ? 'Live' : status.realtimeMode === 'degraded' ? 'Reconnecting…' : 'Off'
+          }
+          dotColor={
+            status.realtimeMode === 'live' ? theme.income : status.realtimeMode === 'degraded' ? theme.warning : theme.border
+          }
         />
-      </View>
+        {lastSyncFrom ? <CloudInfoRow label="From Device" value={lastSyncFrom} /> : null}
 
-      <View style={styles.row}>
-        <View style={styles.rowLabel}>
-          <ThemedText type="default">Wi-Fi only</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            Don&apos;t auto-sync on mobile data
-          </ThemedText>
-        </View>
-        <Switch
-          value={wifiOnly}
-          onValueChange={setWifiOnly}
-          trackColor={{ true: theme.primary, false: theme.border }}
-          thumbColor="#FFFFFF"
-          accessibilityLabel="Wi-Fi only"
-        />
-      </View>
+        {lastResult && lastResult.conflicts > 0 ? (
+          <View style={[styles.conflictBanner, { backgroundColor: theme.expenseSoft }]}>
+            <AlertTriangle size={16} color={theme.danger} />
+            <ThemedText type="small" themeColor="danger" style={styles.conflictText}>
+              {lastResult.conflicts === 1
+                ? '1 local change was overwritten by a newer version from the cloud.'
+                : `${lastResult.conflicts} local changes were overwritten by newer versions from the cloud.`}
+            </ThemedText>
+          </View>
+        ) : null}
 
-      <View style={styles.row}>
-        <View style={styles.rowLabel}>
-          <ThemedText type="default">Auto-sync frequency</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {intervalMinutes > 0
-              ? `Every ${intervalMinutes} minutes while the app is open`
-              : 'Only when you edit or open the app'}
-          </ThemedText>
-        </View>
-      </View>
-      <View style={styles.frequencyRow}>
-        {SYNC_INTERVAL_OPTIONS.map((option) => (
-          <Chip
-            key={option.minutes}
-            label={option.label}
-            selected={intervalMinutes === option.minutes}
-            onPress={() => setIntervalMinutes(option.minutes)}
-            style={styles.frequencyChip}
-          />
-        ))}
-      </View>
+        <Pressable
+          onPress={() => {
+            impact('light');
+            router.push('/conflicts');
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Review sync conflicts"
+          style={styles.row}>
+          <View style={styles.rowLabel}>
+            <ThemedText type="default">Conflicts</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {conflictCount === 0
+                ? 'No unsynced changes were overwritten'
+                : `${conflictCount} local ${conflictCount === 1 ? 'change was' : 'changes were'} overwritten — review & restore`}
+            </ThemedText>
+          </View>
+          <ChevronRight size={18} color={theme.textSecondary} />
+        </Pressable>
 
-      <View style={styles.row}>
-        <View style={styles.rowLabel}>
-          <ThemedText type="default">Pending changes</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {failedCount > 0
-              ? `${pendingCount - failedCount} pending · ${failedCount} failed`
-              : pendingCount > 0
-                ? `${pendingCount} pending`
-                : 'All caught up'}
-          </ThemedText>
-        </View>
-      </View>
-      {failedCount > 0 ? (
+        {/* Primary Sync Now button - solid green (income variant) */}
         <LargeButton
-          title="Retry Failed Uploads"
-          subtitle="Reset the queue and upload again"
+          title="Sync Now"
+          subtitle="Upload & download the latest"
           icon={RefreshCw}
-          onPress={handleRetryAll}
-          variant="outline"
-          height={56}
-        />
-      ) : null}
-      {failedCount > 0 ? (
-        <LargeButton
-          title="Show Sync Errors"
-          subtitle="See exactly why uploads failed"
-          icon={AlertTriangle}
-          onPress={showLastSyncErrors}
-          variant="outline"
-          height={56}
-        />
-      ) : null}
-
-      <LargeButton
-        title="Force Full Re-download"
-        subtitle="Clear pull cursors and re-fetch all cloud data"
-        icon={Download}
-        onPress={async () => {
-          const confirmed = await new Promise<boolean>((resolve) => {
-            Alert.alert(
-              'Force Full Re-download',
-              'This will clear all local pull cursors and re-download all data from the cloud. Any unsynced local changes will be overwritten by the cloud versions. Continue?',
-              [
-                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-                { text: 'Re-download', style: 'destructive', onPress: () => resolve(true) },
-              ]
-            );
-          });
-          if (!confirmed) return;
-          impact('heavy');
-          await resetSyncMeta();
-          void runNow(); // triggers a fresh pull with empty cursors
-        }}
-        variant="outline"
-        height={56}
-      />
-
-      <ThemedText type="smallBold" themeColor="textSecondary" style={styles.cloudNote}>
-        Device name
-      </ThemedText>
-      <TextField
-        placeholder="e.g. Shop counter"
-        value={deviceName}
-        onChangeText={setDeviceNameState}
-        autoCapitalize="words"
-        accessibilityLabel="Device name"
-        style={styles.deviceField}
-      />
-      <LargeButton
-        title="Save Device Name"
-        subtitle="Shown as 'Last Sync from' on your devices"
-        icon={Smartphone}
-        onPress={saveDeviceName}
-        variant="outline"
-        height={56}
-        disabled={deviceBusy}
-      />
-      {deviceSaved ? (
-        <ThemedText type="small" themeColor="primary" style={styles.savedLine}>
-          Saved ✓
-        </ThemedText>
-      ) : null}
-
-      <Pressable
-        onPress={() => {
-          impact('light');
-          setHistoryOpen((value) => !value);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel="Sync history"
-        style={styles.row}>
-        <View style={[styles.icon, { backgroundColor: theme.backgroundElement }]}>
-          <History size={22} color={theme.text} />
-        </View>
-        <View style={styles.rowLabel}>
-          <ThemedText type="default">Sync History</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            Conflicts & recent syncs
-          </ThemedText>
-        </View>
-        {historyOpen ? (
-          <ChevronDown size={22} color={theme.text} />
-        ) : (
-          <ChevronRight size={22} color={theme.text} />
-        )}
-      </Pressable>
-      {historyOpen ? (
-        <View style={styles.historyList}>
-          {historyEvents.length === 0 ? (
-            <ThemedText type="small" themeColor="textSecondary">
-              No sync activity yet.
-            </ThemedText>
-          ) : (
-            historyEvents.map((event) => (
-              <View key={event.id} style={styles.historyRow}>
-                <View
-                  style={[
-                    styles.historyDot,
-                    { backgroundColor: event.eventType === 'conflict' ? theme.danger : theme.primary },
-                  ]}
-                />
-                <ThemedText
-                  type="small"
-                  themeColor={event.eventType === 'conflict' ? 'danger' : 'textSecondary'}
-                  style={styles.historyText}>
-                  {event.message}
-                </ThemedText>
-              </View>
-            ))
-          )}
-        </View>
-      ) : null}
-
-      <Pressable
-        onPress={() => {
-          impact('light');
-          setDevicesOpen((value) => !value);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel="Synced devices"
-        style={styles.row}>
-        <View style={[styles.icon, { backgroundColor: theme.backgroundElement }]}>
-          <Smartphone size={22} color={theme.text} />
-        </View>
-        <View style={styles.rowLabel}>
-          <ThemedText type="default">Synced Devices</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            Devices that have successfully synced
-          </ThemedText>
-        </View>
-        {devicesOpen ? (
-          <ChevronDown size={22} color={theme.text} />
-        ) : (
-          <ChevronRight size={22} color={theme.text} />
-        )}
-      </Pressable>
-      {devicesOpen ? (
-        <View style={styles.historyList}>
-          {syncedDevices.length === 0 ? (
-            <ThemedText type="small" themeColor="textSecondary">
-              No devices have synced yet.
-            </ThemedText>
-          ) : (
-            syncedDevices.map((device) => (
-              <View key={device.id} style={styles.historyRow}>
-                <View style={[styles.historyDot, { backgroundColor: theme.primary }]} />
-                <ThemedText type="small" themeColor="textSecondary" style={styles.historyText}>
-                  {device.deviceName}
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary" style={styles.historyText}>
-                  {formatLastSync(device.lastSyncAt)}
-                </ThemedText>
-              </View>
-            ))
-          )}
-        </View>
-      ) : null}
-
-      <LargeButton
-        title="Sign Out"
-        subtitle={account}
-        icon={LogOut}
-        onPress={confirmSignOut}
-        variant="outline"
-        height={64}
-      />
-
-      {authStatus === 'signedOut' ? (
-        <LargeButton
-          title="Sign In"
-          subtitle="Enable cloud sync"
-          icon={Cloud}
-          onPress={() => router.push('/auth')}
+          onPress={() => {
+            impact('medium');
+            void runNow();
+          }}
+          variant="income"
           height={64}
+          disabled={syncing}
         />
-      ) : null}
-    </Card>
+      </Card>
+
+      {/* Card 2: Preferences */}
+      <Card style={styles.cloudCard}>
+        <ThemedText type="default" style={styles.cardSectionTitle}>Preferences</ThemedText>
+
+        <View style={styles.row}>
+          <View style={styles.rowLabel}>
+            <ThemedText type="default">Auto Sync</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Back up changes automatically
+            </ThemedText>
+          </View>
+          <Switch
+            value={autoSync}
+            onValueChange={setAutoSync}
+            trackColor={{ true: theme.primary, false: theme.border }}
+            thumbColor="#FFFFFF"
+            accessibilityLabel="Auto sync"
+          />
+        </View>
+
+        {/* Conditional: Wi-Fi only and frequency chips disabled when Auto Sync is off */}
+        <View style={[styles.row, { opacity: autoSync ? 1 : 0.5 }]}>
+          <View style={styles.rowLabel}>
+            <ThemedText type="default">Wi-Fi only</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Don&apos;t auto-sync on mobile data
+            </ThemedText>
+          </View>
+          <Switch
+            value={wifiOnly}
+            onValueChange={autoSync ? setWifiOnly : undefined}
+            disabled={!autoSync}
+            trackColor={{ true: theme.primary, false: theme.border }}
+            thumbColor="#FFFFFF"
+            accessibilityLabel="Wi-Fi only"
+          />
+        </View>
+
+        <View style={[styles.row, { opacity: autoSync ? 1 : 0.5 }]}>
+          <View style={styles.rowLabel}>
+            <ThemedText type="default">Auto-sync frequency</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {intervalMinutes > 0
+                ? `Every ${intervalMinutes} minutes while the app is open`
+                : 'Only when you edit or open the app'}
+            </ThemedText>
+          </View>
+        </View>
+        <View style={[styles.frequencyRow, { opacity: autoSync ? 1 : 0.5 }]}>
+          {SYNC_INTERVAL_OPTIONS.map((option) => (
+            <Chip
+              key={option.minutes}
+              label={option.label}
+              selected={intervalMinutes === option.minutes}
+              onPress={autoSync ? () => setIntervalMinutes(option.minutes) : undefined}
+              disabled={!autoSync}
+              style={styles.frequencyChip}
+            />
+          ))}
+        </View>
+
+        <View style={styles.row}>
+          <View style={styles.rowLabel}>
+            <ThemedText type="default">Pending changes</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {failedCount > 0
+                ? `${pendingCount - failedCount} pending · ${failedCount} failed`
+                : pendingCount > 0
+                  ? `${pendingCount} pending`
+                  : 'All caught up'}
+            </ThemedText>
+          </View>
+        </View>
+        {failedCount > 0 ? (
+          <LargeButton
+            title="Retry Failed Uploads"
+            subtitle="Reset the queue and upload again"
+            icon={RefreshCw}
+            onPress={handleRetryAll}
+            variant="outline"
+            height={56}
+          />
+        ) : null}
+        {failedCount > 0 ? (
+          <LargeButton
+            title="Show Sync Errors"
+            subtitle="See exactly why uploads failed"
+            icon={AlertTriangle}
+            onPress={showLastSyncErrors}
+            variant="outline"
+            height={56}
+          />
+        ) : null}
+      </Card>
+
+      {/* Card 3: Device Management */}
+      <Card style={styles.cloudCard}>
+        <ThemedText type="default" style={styles.cardSectionTitle}>Device Management</ThemedText>
+
+        {/* Device Name with inline save button */}
+        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.cloudNote}>
+          Device Name
+        </ThemedText>
+        <View style={styles.deviceNameRow}>
+          <TextField
+            placeholder="e.g. Shop counter"
+            value={deviceName}
+            onChangeText={setDeviceNameState}
+            autoCapitalize="words"
+            accessibilityLabel="Device name"
+            style={styles.deviceField}
+          />
+          <Pressable
+            onPress={deviceBusy ? undefined : saveDeviceName}
+            disabled={deviceBusy}
+            accessibilityLabel="Save device name"
+            style={styles.inlineSaveButton}>
+            <ThemedText type="smallBold" themeColor={deviceBusy ? 'textSecondary' : 'primary'}>
+              {deviceBusy ? 'Saving…' : 'Save'}
+            </ThemedText>
+          </Pressable>
+        </View>
+        {deviceSaved ? (
+          <ThemedText type="small" themeColor="primary" style={styles.savedLine}>
+            Saved ✓
+          </ThemedText>
+        ) : null}
+
+        <Pressable
+          onPress={() => {
+            impact('light');
+            setHistoryOpen((value) => !value);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Sync history"
+          style={styles.row}>
+          <View style={[styles.icon, { backgroundColor: theme.backgroundElement }]}>
+            <History size={22} color={theme.text} />
+          </View>
+          <View style={styles.rowLabel}>
+            <ThemedText type="default">Sync History</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Conflicts & recent syncs
+            </ThemedText>
+          </View>
+          {historyOpen ? (
+            <ChevronDown size={22} color={theme.text} />
+          ) : (
+            <ChevronRight size={22} color={theme.text} />
+          )}
+        </Pressable>
+        {historyOpen ? (
+          <View style={styles.historyList}>
+            {historyEvents.length === 0 ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                No sync activity yet.
+              </ThemedText>
+            ) : (
+              historyEvents.map((event) => (
+                <View key={event.id} style={styles.historyRow}>
+                  <View
+                    style={[
+                      styles.historyDot,
+                      { backgroundColor: event.eventType === 'conflict' ? theme.danger : theme.primary },
+                    ]}
+                  />
+                  <ThemedText
+                    type="small"
+                    themeColor={event.eventType === 'conflict' ? 'danger' : 'textSecondary'}
+                    style={styles.historyText}>
+                    {event.message}
+                  </ThemedText>
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
+
+        <Pressable
+          onPress={() => {
+            impact('light');
+            setDevicesOpen((value) => !value);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Synced devices"
+          style={styles.row}>
+          <View style={[styles.icon, { backgroundColor: theme.backgroundElement }]}>
+            <Smartphone size={22} color={theme.text} />
+          </View>
+          <View style={styles.rowLabel}>
+            <ThemedText type="default">Synced Devices</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Devices that have successfully synced
+            </ThemedText>
+          </View>
+          {devicesOpen ? (
+            <ChevronDown size={22} color={theme.text} />
+          ) : (
+            <ChevronRight size={22} color={theme.text} />
+          )}
+        </Pressable>
+        {devicesOpen ? (
+          <View style={styles.historyList}>
+            {syncedDevices.length === 0 ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                No devices have synced yet.
+              </ThemedText>
+            ) : (
+              syncedDevices.map((device) => (
+                <View key={device.id} style={styles.historyRow}>
+                  <View style={[styles.historyDot, { backgroundColor: theme.primary }]} />
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.historyText}>
+                    {device.deviceName}
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.historyText}>
+                    {formatLastSync(device.lastSyncAt)}
+                  </ThemedText>
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
+
+        {/* Advanced section - Force Full Re-download as ghost button */}
+        <View style={styles.advancedSection}>
+          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.cloudNote}>
+            Advanced
+          </ThemedText>
+          <Pressable
+            onPress={handleForceRedownload}
+            accessibilityRole="button"
+            accessibilityLabel="Force full re-download"
+            style={styles.advancedButton}>
+            <ThemedText type="smallBold" themeColor="textSecondary">
+              Force Full Re-download
+            </ThemedText>
+          </Pressable>
+          <ThemedText type="small" themeColor="textSecondary" style={styles.cloudNote}>
+            Clear pull cursors and re-fetch all cloud data
+          </ThemedText>
+        </View>
+
+        {/* Sign Out - red text, no heavy border */}
+        <Pressable
+          onPress={confirmSignOut}
+          accessibilityRole="button"
+          accessibilityLabel="Sign out"
+          style={styles.signOutButton}>
+          <ThemedText type="default" themeColor="danger">
+            Sign Out
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary" style={styles.signOutSubtitle}>
+            {account}
+          </ThemedText>
+        </Pressable>
+
+        {authStatus === 'signedOut' ? (
+          <LargeButton
+            title="Sign In"
+            subtitle="Enable cloud sync"
+            icon={Cloud}
+            onPress={() => router.push('/auth')}
+            variant="outline"
+            height={64}
+          />
+        ) : null}
+      </Card>
+    </View>
   );
 }
 
@@ -1489,5 +1533,49 @@ const styles = StyleSheet.create({
   },
   deviceField: {
     marginTop: Spacing.one,
+  },
+  cloudSyncWrapper: {
+    gap: Spacing.three,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+  },
+  cardSectionTitle: {
+    marginBottom: Spacing.two,
+  },
+  deviceNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    marginTop: Spacing.one,
+  },
+  inlineSaveButton: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+  },
+  advancedSection: {
+    marginTop: Spacing.two,
+    paddingTop: Spacing.three,
+    borderTopWidth: 1,
+    borderTopColor: 'transparent',
+    gap: Spacing.one,
+  },
+  advancedButton: {
+    paddingVertical: Spacing.one,
+  },
+  signOutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    marginTop: Spacing.two,
+    borderTopWidth: 1,
+    borderTopColor: 'transparent',
+  },
+  signOutSubtitle: {
+    marginTop: 2,
   },
 });

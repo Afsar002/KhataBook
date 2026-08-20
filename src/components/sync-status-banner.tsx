@@ -1,4 +1,5 @@
 import { View, StyleSheet } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WifiOff, RefreshCw, CheckCircle, AlertCircle, Info, CloudOff } from 'lucide-react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -8,17 +9,19 @@ import { useAuth } from '@/context/auth-context';
 import { useTheme } from '@/hooks/use-theme';
 
 export function SyncStatusBanner() {
-  const { status, realtimeMode, runNow, lastResult } = useSync();
+  const { status, runNow, lastResult } = useSync();
+  const realtimeMode = status.realtimeMode;
   const { account } = useAuth();
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
 
   // Don't show banner if not signed in or cloud sync not configured
-  if (!account || status === 'unconfigured') {
+  if (!account || status.state === 'unconfigured') {
     return null;
   }
 
   const getBannerConfig = () => {
-    switch (status) {
+    switch (status.state) {
       case 'offline':
         return {
           icon: WifiOff,
@@ -103,45 +106,57 @@ export function SyncStatusBanner() {
 
   // Only show banner for non-idle states (offline, syncing, error, version_blocked)
   // Hide when idle (synced) for a cleaner UI
-  const showBanner = status !== 'idle';
+  const showBanner = status.state !== 'idle';
 
   if (!showBanner) {
     return null;
   }
 
   return (
-    <View style={[styles.banner, { backgroundColor: config.bgColor }]}>
-      <View style={styles.content}>
-        <Icon size={18} color={config.iconColor} style={styles.icon} />
-        <View style={styles.textContainer}>
-          <ThemedText type="smallBold" style={[styles.label, { color: config.iconColor }]}>
-            {config.label}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary" style={styles.message}>
-            {config.message}
-          </ThemedText>
-        </View>
-        {config.action && (
-          <View style={styles.action}>
-            <ThemedText
-              type="smallBold"
-              onPress={config.action.onPress}
-              accessibilityRole="button"
-              accessibilityLabel={config.action.label}
-              style={[
-                styles.actionText,
-                { color: config.iconColor },
-              ]}>
-              {config.action.label}
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={['top', 'left', 'right']}
+    >
+      <View style={[styles.banner, { backgroundColor: config.bgColor, paddingTop: insets.top + Spacing.two }]}>
+        <View style={styles.content}>
+          <Icon size={18} color={config.iconColor} style={styles.icon} />
+          <View style={styles.textContainer}>
+            <ThemedText type="smallBold" style={[styles.label, { color: config.iconColor }]}>
+              {config.label}
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.message}>
+              {config.message}
             </ThemedText>
           </View>
-        )}
+          {config.action && (
+            <View style={styles.action}>
+              <ThemedText
+                type="smallBold"
+                onPress={config.action.onPress}
+                accessibilityRole="button"
+                accessibilityLabel={config.action.label}
+                style={[
+                  styles.actionText,
+                  { color: config.iconColor },
+                ]}>
+                {config.action.label}
+              </ThemedText>
+            </View>
+          )}
+        </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+  },
   banner: {
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
