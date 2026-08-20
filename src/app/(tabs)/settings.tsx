@@ -13,7 +13,6 @@ import {
   FileSpreadsheet,
   History,
   Lock,
-  LogOut,
   Moon,
   RefreshCw,
   Repeat,
@@ -175,7 +174,6 @@ function CloudSyncCard() {
     runNow,
   } = useSync();
   const lastSyncAt = status.lastSyncAt;
-  console.log('[Settings CloudSyncCard] lastSyncAt from context:', lastSyncAt, 'status:', status.state, 'syncing:', syncing);
   const lastSyncFrom = useLastSyncFrom();
   const [deviceName, setDeviceNameState] = useState('');
   const [deviceBusy, setDeviceBusy] = useState(false);
@@ -187,7 +185,6 @@ function CloudSyncCard() {
   const [historyEvents, setHistoryEvents] = useState<SyncHistoryEntry[]>([]);
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [syncedDevices, setSyncedDevices] = useState<SyncDevice[]>([]);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   useEffect(() => {
     getDeviceName().then(setDeviceNameState);
   }, []);

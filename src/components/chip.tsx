@@ -10,7 +10,7 @@ import { impact } from '@/utils/haptics';
 type ChipProps = {
   label: string;
   selected: boolean;
-  onPress: () => void;
+  onPress?: () => void;
   icon?: ReactNode;
   style?: ViewStyle;
   disabled?: boolean;

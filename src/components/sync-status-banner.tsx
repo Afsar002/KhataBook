@@ -70,7 +70,7 @@ export function SyncStatusBanner() {
             message: 'All changes are up to date (live sync active)',
             action: null,
           };
-        } else if (realtimeMode === 'trigger') {
+        } else if (realtimeMode === 'connecting') {
           return {
             icon: Info,
             bgColor: theme.primarySoft,
