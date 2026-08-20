@@ -87,6 +87,12 @@ export async function pushPendingChanges(
           await deleteRemote(supabase, entry.tableName, entry.recordUuid);
           result.deleted += 1;
         } else {
+          // Backfill user_id if missing — offline-created records have user_id: null
+          // which would violate RLS (user_id NOT NULL + auth.uid() = user_id).
+          const existingUserId = row.user_id as string | null | undefined;
+          if (!existingUserId || existingUserId === '') {
+            console.log(`[Push] Backfilling user_id for ${entry.tableName}/${entry.recordUuid} (was: ${existingUserId ?? 'null'})`);
+          }
           sentPayload = {
             ...row,
             user_id: userId,
