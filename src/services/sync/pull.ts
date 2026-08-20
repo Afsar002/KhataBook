@@ -103,6 +103,7 @@ async function fetchRemote(
     console.error(`[Sync Pull Fetch Failed] table=${table} error=${errMsg}`);
     throw error;
   }
+  console.log(`[Sync Pull] table=${table} cursor=${cursor} fetched=${data?.length ?? 0} rows`);
   return (data ?? []) as Record<string, unknown>[];
 }
 
@@ -159,6 +160,7 @@ export async function pullRemoteChanges(
       continue; // continue with next table
     }
     const uuidToId = await loadUuidToIdMap(table);
+    console.log(`[Sync Pull] table=${table} cursor=${cursor} uuidToIdKeys=${Object.keys(uuidToId).length} rowsToProcess=${remoteRows.length}`);
 
     let lastUpdatedAt = cursor;
 
@@ -174,6 +176,8 @@ export async function pullRemoteChanges(
         `SELECT * FROM ${table} WHERE uuid = ?`,
         String(remote.id)
       );
+
+      console.log(`[Sync Pull] table=${table} uuid=${remote.id} remoteUpdatedAt=${remoteUpdatedAt} localExists=${!!local} localUpdatedAt=${local?.updated_at ?? 'null'} isTombstone=${Boolean(remote.deleted_at)} queued=${queuedKeys.has(`${table}:${String(remote.id)}`)}`);
 
       const isTombstone = Boolean(remote.deleted_at);
 
@@ -209,12 +213,14 @@ export async function pullRemoteChanges(
       const localUpdatedAt = (local?.updated_at as string | null) ?? null;
       // Last-write-wins: only apply when the remote row is newer.
       if (local && localUpdatedAt && localUpdatedAt >= remoteUpdatedAt) {
+        console.log(`[Sync Pull] SKIPPED (local newer or equal) table=${table} uuid=${remote.id} localUpdatedAt=${localUpdatedAt} remoteUpdatedAt=${remoteUpdatedAt}`);
         result.skipped += 1;
         continue;
       }
 
       const localRow = toLocalRow(spec, remote, uuidToId);
       if (!localRow) {
+        console.log(`[Sync Pull] SKIPPED (missing parent) table=${table} uuid=${remote.id}`);
         result.skipped += 1; // missing parent — resolved on a later pull
         continue;
       }
