@@ -580,6 +580,9 @@ export interface DayLedgerSummary {
  * Per-day ledger summary for a date range, newest first. `cashInHand` is the
  * running balance computed over ALL days (not just the range), so the first
  * row carries the true pre-range balance in. Omit `from`/`to` for all time.
+ *
+ * Cash in hand = net of all CASH accounts: income − expense + transfers IN − transfers OUT.
+ * Transfers between cash accounts cancel out; transfers between cash ↔ bank change cash in hand.
  */
 export async function listDaySummaries(from?: string, to?: string): Promise<DayLedgerSummary[]> {
   const db = getDatabase();
@@ -598,10 +601,27 @@ export async function listDaySummaries(from?: string, to?: string): Promise<DayL
         COALESCE(SUM(CASE WHEN type = 'expense' THEN amount END), 0) AS expense
       FROM transactions
       GROUP BY date
+    ), day_transfers AS (
+      SELECT date,
+        COALESCE(SUM(CASE WHEN fa.type = 'cash' AND ta.type <> 'cash' THEN tr.amount END), 0) AS cashOut,
+        COALESCE(SUM(CASE WHEN fa.type <> 'cash' AND ta.type = 'cash' THEN tr.amount END), 0) AS cashIn
+      FROM transfers tr
+      JOIN accounts fa ON fa.id = tr.from_account_id
+      JOIN accounts ta ON ta.id = tr.to_account_id
+      WHERE fa.type = 'cash' OR ta.type = 'cash'
+      GROUP BY date
+    ), daily AS (
+      SELECT dn.date,
+             dn.entryCount,
+             dn.income,
+             dn.expense,
+             COALESCE(dt.cashIn, 0) - COALESCE(dt.cashOut, 0) AS netTransfers
+      FROM day_net dn
+      LEFT JOIN day_transfers dt ON dt.date = dn.date
     ), cumulative AS (
       SELECT date, entryCount, income, expense,
-             SUM(income - expense) OVER (ORDER BY date) AS cashInHand
-      FROM day_net
+             SUM(income - expense + netTransfers) OVER (ORDER BY date) AS cashInHand
+      FROM daily
     )
     SELECT * FROM cumulative
     ${bounds}
