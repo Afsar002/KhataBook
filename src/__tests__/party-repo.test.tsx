@@ -57,11 +57,10 @@ describe('Party repo — opening balances', () => {
     const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        table: 'parties',
-        operation: 'insert',
-        payload: expect.objectContaining({ opening_balance: 2500 }),
-      })
+      'parties',
+      expect.anything(),
+      'insert',
+      expect.objectContaining({ opening_balance: 2500 })
     );
   });
 
@@ -85,12 +84,10 @@ describe('Party repo — opening balances', () => {
     const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        table: 'parties',
-        operation: 'update',
-        recordUuid: 'party-uuid',
-        payload: expect.objectContaining({ opening_balance: 500 }),
-      })
+      'parties',
+      'party-uuid',
+      'update',
+      expect.objectContaining({ opening_balance: 500 })
     );
   });
 

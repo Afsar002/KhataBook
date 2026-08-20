@@ -44,7 +44,10 @@ describe('Category repo', () => {
     const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ table: 'categories', operation: 'insert' })
+      'categories',
+      expect.anything(),
+      'insert',
+      expect.objectContaining({ name: 'Groceries', type: 'expense' })
     );
   });
 
@@ -59,11 +62,10 @@ describe('Category repo', () => {
     const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        table: 'categories',
-        operation: 'update',
-        recordUuid: 'cat-uuid',
-      })
+      'categories',
+      'cat-uuid',
+      'update',
+      expect.objectContaining({ name: 'Snacks' })
     );
   });
 
@@ -76,11 +78,9 @@ describe('Category repo', () => {
     const { enqueueChange } = require('@/db/sync/queue');
     expect(enqueueChange).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        table: 'categories',
-        operation: 'delete',
-        recordUuid: 'cat-uuid',
-      })
+      'categories',
+      'cat-uuid',
+      'delete'
     );
   });
 

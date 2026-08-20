@@ -103,11 +103,9 @@ describe('Edit/delete entry repos — get + update', () => {
       const { enqueueChange } = require('@/db/sync/queue');
       expect(enqueueChange).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({
-          table: 'transactions',
-          operation: 'update',
-          recordUuid: 'tx-uuid',
-        })
+        'transactions',
+        'tx-uuid',
+        'update'
       );
     });
 
@@ -167,11 +165,9 @@ describe('Edit/delete entry repos — get + update', () => {
       const { enqueueChange } = require('@/db/sync/queue');
       expect(enqueueChange).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({
-          table: 'transfers',
-          operation: 'update',
-          recordUuid: 'tr-uuid',
-        })
+        'transfers',
+        'tr-uuid',
+        'update'
       );
     });
 
@@ -243,11 +239,9 @@ describe('Edit/delete entry repos — get + update', () => {
       const { enqueueChange } = require('@/db/sync/queue');
       expect(enqueueChange).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({
-          table: 'party_transactions',
-          operation: 'update',
-          recordUuid: 'pt-uuid',
-        })
+        'party_transactions',
+        'pt-uuid',
+        'update'
       );
     });
 

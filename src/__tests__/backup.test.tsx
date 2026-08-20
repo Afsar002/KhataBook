@@ -316,7 +316,10 @@ describe('Backup/Restore Module', () => {
       expect(enqueueChange).toHaveBeenCalledTimes(2);
       expect(enqueueChange).toHaveBeenCalledWith(
         mockDb,
-        expect.objectContaining({ table: 'accounts', operation: 'insert' })
+        'accounts',
+        expect.anything(),
+        'insert',
+        null
       );
     });
 
