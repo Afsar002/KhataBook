@@ -37,11 +37,15 @@ import { getDeviceName } from '@/services/device/device-name';
 import { getCurrentSession } from '@/services/supabase/auth';
 import { getSupabaseClient } from '@/services/supabase/client';
 import { isSyncConfigured } from '@/services/supabase/config';
-import { emitSyncResult, onQueueChange, onRemoteWake } from '@/services/sync/events';
+import { onQueueChange, onRemoteWake } from '@/services/sync/events';
 import { realtime } from '@/services/sync/realtime';
 import type { RealtimeMode } from '@/services/sync/realtime';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { SyncResult, SyncSource, SyncError } from '@/services/sync/events';
+
+// Re-exported so UI layers (context, notifications) can type against the
+// engine without reaching into the events bus directly.
+export type { SyncResult, SyncSource, SyncError };
 
 export type SyncState =
   | 'unconfigured'
@@ -118,7 +122,7 @@ function updateStatus(partial: Partial<SyncStatus>): void {
   for (const [key, value] of Object.entries(partial)) {
     if (status[key as keyof SyncStatus] !== value) {
       console.log(`[Sync Engine] updateStatus: ${key} = ${status[key as keyof SyncStatus]} -> ${value}`);
-      (status as Record<string, unknown>)[key] = value;
+      (status as unknown as Record<string, unknown>)[key] = value;
       changed = true;
     }
   }
@@ -127,9 +131,14 @@ function updateStatus(partial: Partial<SyncStatus>): void {
   }
 }
 
+/** Refreshes badge counts; a DB error must never break a sync run. */
 async function refreshQueueCounts(): Promise<void> {
-  const [pending, failed] = await Promise.all([countPending(), countFailed()]);
-  updateStatus({ pendingCount: pending, failedCount: failed });
+  try {
+    const [pending, failed] = await Promise.all([countPending(), countFailed()]);
+    updateStatus({ pendingCount: pending, failedCount: failed });
+  } catch (e) {
+    console.warn('[Sync] queue counts unavailable:', e instanceof Error ? e.message : String(e));
+  }
 }
 
 /** Loads persisted state (call once on boot, after the database is ready). */
@@ -155,17 +164,26 @@ export async function initSyncState(
     return;
   }
 
-  // Check minimum version before starting sync
-  const appMeta = await fetchAppMeta(getClient);
-  if (!versionSatisfies(APP_VERSION, appMeta.min_version)) {
-    updateStatus({ state: 'version_blocked' });
-    return;
+  // Check minimum version before starting sync. A fetch failure fails open
+  // (sync may proceed); only a confirmed stale version blocks boot.
+  try {
+    const appMeta = await fetchAppMeta(getClient);
+    if (!versionSatisfies(APP_VERSION, appMeta.min_version)) {
+      updateStatus({ state: 'version_blocked' });
+      return;
+    }
+  } catch (e) {
+    console.warn('[Sync] app-meta fetch failed during boot, continuing:', e instanceof Error ? e.message : String(e));
   }
 
-  const lastSyncAt = await getMeta(LAST_SYNC_KEY);
-  const lastSuccessAt = await getMeta(LAST_SUCCESS_KEY);
-  console.log('[Sync Engine] initSyncState - lastSyncAt from meta:', lastSyncAt);
-  console.log('[Sync Engine] initSyncState - lastSuccessAt from meta:', lastSuccessAt);
+  let lastSyncAt: string | null = null;
+  let lastSuccessAt: string | null = null;
+  try {
+    lastSyncAt = await getMeta(LAST_SYNC_KEY);
+    lastSuccessAt = await getMeta(LAST_SUCCESS_KEY);
+  } catch (e) {
+    console.warn('[Sync] meta read failed during boot:', e instanceof Error ? e.message : String(e));
+  }
   const [autoSync, wifiOnly, intervalMinutes] = await Promise.all([
     getAutoSync(),
     getWifiOnlySync(),
@@ -286,83 +304,101 @@ async function runSync(
   source: SyncSource,
   getClient: () => SupabaseClient | null
 ): Promise<SyncResult | null> {
+  // Claim the run up-front so two triggers racing in the same tick can't both
+  // pass the gate before either awaits. Released in `finally`.
   if (running) {
-    return lastResult;
-  }
-
-  const supabase = getClient();
-  if (!isSyncConfigured() || !supabase) {
-    setState('unconfigured');
     return null;
   }
-
-  const session = getCurrentSession();
-  if (!session?.user.id) {
-    setState('idle');
-    return null;
-  }
-
-  // Auto-sync gates — manual always runs
-  if (source !== 'manual') {
-    if (!(await getAutoSync())) {
-      return null; // auto-sync disabled
-    }
-    if (source !== 'retry' && await getWifiOnlySync()) {
-      const network = await Network.getNetworkStateAsync();
-      if (
-        network.type !== Network.NetworkStateType.WIFI &&
-        network.type !== Network.NetworkStateType.UNKNOWN
-      ) {
-        return null; // defer auto/realtime/foreground on cellular
-      }
-    }
-  }
-
-  // Connectivity gate — skip straight to an offline status when known down.
-  const network = await Network.getNetworkStateAsync();
-  if (network.isConnected === false) {
-    setState('offline');
-    return null;
-  }
-
-  // Minimum version enforcement — block sync if app is too old.
-  const appMeta = await fetchAppMeta(getClient);
-  if (!versionSatisfies(APP_VERSION, appMeta.min_version)) {
-    setState('version_blocked');
-    return null;
-  }
-
   running = true;
+
   const startTime = Date.now();
   const now = nowIso();
-  setState('syncing');
-
-  const userId = session.user.id;
-  console.log('[Sync] userId for push:', userId, 'session:', !!session.access_token);
 
   try {
-    console.log('[Sync Engine] runSync - starting push...');
+    const supabase = getClient();
+    if (!isSyncConfigured() || !supabase) {
+      setState('unconfigured');
+      return null;
+    }
+
+    const session = getCurrentSession();
+    if (!session?.user.id) {
+      setState('idle');
+      return null;
+    }
+
+    // Auto-sync gates — manual always runs
+    if (source !== 'manual') {
+      if (!(await getAutoSync())) {
+        return null; // auto-sync disabled
+      }
+      if (source !== 'retry' && (await getWifiOnlySync())) {
+        const network = await Network.getNetworkStateAsync();
+        if (
+          network.type !== Network.NetworkStateType.WIFI &&
+          network.type !== Network.NetworkStateType.UNKNOWN
+        ) {
+          return null; // defer auto/realtime/foreground on cellular
+        }
+      }
+    }
+
+    // Connectivity gate — skip straight to an offline status when known down.
+    const network = await Network.getNetworkStateAsync();
+    if (network.isConnected === false) {
+      setState('offline');
+      return null;
+    }
+
+    // Minimum version enforcement — block sync if app is too old. A failed
+    // fetch fails open (sync proceeds); only a confirmed stale version blocks.
+    let appMeta = null;
+    try {
+      appMeta = await fetchAppMeta(getClient);
+    } catch (e) {
+      console.warn('[Sync] app-meta fetch failed, proceeding:', e instanceof Error ? e.message : String(e));
+    }
+    if (appMeta && !versionSatisfies(APP_VERSION, appMeta.min_version)) {
+      setState('version_blocked');
+      return null;
+    }
+
+    setState('syncing');
+
+    console.log('[Sync] starting push (session present)');
+
+    const userId = session.user.id;
     const pushResult = await pushPendingChanges(supabase, userId);
-    console.log('[Sync Engine] runSync - push complete:', { pushed: pushResult.pushed, deleted: pushResult.deleted, failed: pushResult.failed, authError: pushResult.authError });
     if (pushResult.authError) {
       setState('idle');
-      // Still record the sync attempt timestamp so "Last sync" isn't "Never"
-      await setMeta(LAST_SYNC_KEY, now);
-      updateStatus({ lastSyncAt: now });
+      // Still record the sync attempt timestamp so "Last sync" isn't "Never".
+      // A meta-write failure here must not mask the auth outcome.
+      try {
+        await setMeta(LAST_SYNC_KEY, now);
+        updateStatus({ lastSyncAt: now });
+      } catch (e) {
+        console.warn('[Sync] timestamp write failed:', e instanceof Error ? e.message : String(e));
+      }
       return null; // token expired — re-auth resumes syncing
     }
 
-    console.log('[Sync Engine] runSync - starting pull...');
     const pullResult = await pullRemoteChanges(supabase, userId);
-    console.log('[Sync Engine] runSync - pull complete:', { inserted: pullResult.inserted, updated: pullResult.updated, deleted: pullResult.deleted, skipped: pullResult.skipped, conflicts: pullResult.conflicts, errors: pullResult.errors.length });
 
-    console.log('[Sync Engine] runSync - writing LAST_SYNC_KEY...');
-    await setMeta(LAST_SYNC_KEY, now);
-    const verifyRead = await getMeta(LAST_SYNC_KEY);
-    console.log('[Sync Engine] Set LAST_SYNC_KEY to:', now, '| verify read back:', verifyRead);
+    // Persist the attempt timestamp; verify the read-back before reporting
+    // success so a silent write failure doesn't claim a sync happened.
+    let timestampOk = false;
+    try {
+      await setMeta(LAST_SYNC_KEY, now);
+      timestampOk = (await getMeta(LAST_SYNC_KEY)) === now;
+    } catch (e) {
+      console.warn('[Sync] timestamp write failed:', e instanceof Error ? e.message : String(e));
+    }
     if (pushResult.failed === 0) {
-      await setMeta(LAST_SUCCESS_KEY, now);
-      console.log('[Sync Engine] Set LAST_SUCCESS_KEY to:', now);
+      try {
+        await setMeta(LAST_SUCCESS_KEY, now);
+      } catch (e) {
+        console.warn('[Sync] success-stamp write failed:', e instanceof Error ? e.message : String(e));
+      }
     }
 
     const result: SyncResult = {
@@ -381,38 +417,35 @@ async function runSync(
     // Record successful sync run in history (info event) so user sees activity.
     const totalChanges = pushResult.pushed + pushResult.deleted + pullResult.inserted + pullResult.updated;
     if (totalChanges > 0) {
-      await addSyncEvent('info', `Synced ${totalChanges} change${totalChanges === 1 ? '' : 's'} (pushed ${pushResult.pushed}, pulled ${pullResult.inserted + pullResult.updated}).`);
-    }
-
-    // Log errors if any
-    if (result.errors.length > 0) {
-      for (const err of result.errors) {
-        console.error(
-          `[Sync Error] table=${err.table} uuid=${err.uuid} op=${err.operation} code=${err.code ?? 'N/A'} msg=${err.message}`
-        );
+      try {
+        await addSyncEvent('info', `Synced ${totalChanges} change${totalChanges === 1 ? '' : 's'} (pushed ${pushResult.pushed}, pulled ${pullResult.inserted + pullResult.updated}).`);
+      } catch (e) {
+        console.warn('[Sync] history write failed:', e instanceof Error ? e.message : String(e));
       }
     }
 
     lastResult = result;
     updateStatus({
-      lastSyncAt: now,
+      lastSyncAt: timestampOk ? now : status.lastSyncAt,
       lastSuccessAt: pushResult.failed === 0 ? now : status.lastSuccessAt,
       state: pushResult.failed === 0 ? 'idle' : 'error',
     });
-
-    console.log(`[Sync Engine] Sync complete: pushed=${pushResult.pushed} deleted=${pushResult.deleted} pulled=${pullResult.inserted + pullResult.updated} inserted=${pullResult.inserted} updated=${pullResult.updated} skipped=${pullResult.skipped} failed=${pushResult.failed}`);
 
     // Stamp this device's name into the synced settings so other devices
     // show "Last Sync from <name>". Guarded so an unchanged name doesn't
     // re-enqueue (which would schedule another sync run).
     if (pushResult.failed === 0) {
-      const deviceName = await getDeviceName();
-      if (deviceName && (await getSetting('last_sync_from')) !== deviceName) {
-        await setSetting('last_sync_from', deviceName);
-      }
-      // Record this device in the synced devices list (device-local table).
-      if (deviceName) {
-        await recordDeviceSync(deviceName);
+      try {
+        const deviceName = await getDeviceName();
+        if (deviceName && (await getSetting('last_sync_from')) !== deviceName) {
+          await setSetting('last_sync_from', deviceName);
+        }
+        // Record this device in the synced devices list (device-local table).
+        if (deviceName) {
+          await recordDeviceSync(deviceName);
+        }
+      } catch (e) {
+        console.warn('[Sync] device-stamp write failed:', e instanceof Error ? e.message : String(e));
       }
       clearRetry();
     } else {
@@ -422,23 +455,20 @@ async function runSync(
       }
     }
 
-    await refreshQueueCounts();
+    try {
+      await refreshQueueCounts();
+    } catch (e) {
+      console.warn('[Sync] queue-count refresh failed:', e instanceof Error ? e.message : String(e));
+    }
+    // Deliver the result even when bookkeeping above failed — the UI must
+    // always learn the outcome.
     emitResult(result);
     return result;
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error(`[Sync Engine Error] source=${source} error=${errMsg}`);
 
-    // Record the sync attempt timestamp even on unexpected errors
-    await setMeta(LAST_SYNC_KEY, now);
-    const verifyErrorRead = await getMeta(LAST_SYNC_KEY);
-    console.log('[Sync Engine] Set LAST_SYNC_KEY on error to:', now, '| verify read back:', verifyErrorRead);
-    updateStatus({
-      lastSyncAt: now,
-      state: 'error'
-    });
-
-    // Create an error result so the UI can display what went wrong
+    // Create the error result FIRST so its delivery below never depends on
+    // timestamp persistence succeeding.
     const errorResult: SyncResult = {
       pushed: 0,
       deleted: 0,
@@ -458,10 +488,31 @@ async function runSync(
       source,
     };
     lastResult = errorResult;
-    emitResult(errorResult);
 
-    if (source !== 'manual' && (await getAutoSync())) {
-      scheduleRetry();
+    // Record the sync attempt timestamp even on unexpected errors — but a
+    // failure here must not change the error outcome.
+    try {
+      await setMeta(LAST_SYNC_KEY, now);
+      updateStatus({ lastSyncAt: now, state: 'error' });
+    } catch (e) {
+      console.warn('[Sync] error-path timestamp write failed:', e instanceof Error ? e.message : String(e));
+      updateStatus({ state: 'error' });
+    }
+
+    try {
+      emitResult(errorResult);
+    } catch (e) {
+      console.warn('[Sync] result delivery failed:', e instanceof Error ? e.message : String(e));
+    }
+
+    if (source !== 'manual') {
+      try {
+        if (await getAutoSync()) {
+          scheduleRetry();
+        }
+      } catch {
+        // Auto-sync setting unreadable — skip the retry, keep the result.
+      }
     }
     // Don't re-throw for manual — let the UI show the error via lastResult
     return errorResult;
@@ -501,9 +552,13 @@ export async function armPeriodicSync(): Promise<void> {
   if (minutes <= 0) {
     return;
   }
+  // Clamp to the 32-bit timer limit (~24.8 days) so a corrupt interval can
+  // never overflow setTimeout into an immediate/undefined delay.
+  const MAX_INTERVAL_MS = 2_147_483_647;
+  const delayMs = Math.min(minutes * 60_000, MAX_INTERVAL_MS);
   periodicTimer = setInterval(() => {
     void runSync('auto', getSupabaseClient);
-  }, minutes * 60_000);
+  }, delayMs);
 }
 
 /** Called on sign-in / sign-out so the status reflects the session again. */

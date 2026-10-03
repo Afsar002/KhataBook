@@ -19,3 +19,15 @@ alter table transactions
 
 alter table party_transactions
   add column if not exists kind text not null default 'normal';
+
+-- Preserve existing Opening Balance classifications: rows created before the
+-- column existed carried the marker only in their immutable note. Backfill
+-- them so a pull into a fresh device restores them as `opening` (never as
+-- editable normal rows). The updates are guarded so re-running is safe.
+update transactions
+  set kind = 'opening'
+  where kind = 'normal' and note = 'Opening Balance';
+
+update party_transactions
+  set kind = 'opening'
+  where kind = 'normal' and note = 'Opening Balance';

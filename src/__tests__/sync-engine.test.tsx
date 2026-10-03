@@ -401,12 +401,13 @@ describe('Sync Engine', () => {
     });
   });
 
-  describe('pendingCount', () => {
-    it('returns pending count from queue', async () => {
+  describe('queue counts', () => {
+    it('does not re-read the queue on demand — counts load during initSyncState', async () => {
       queue.countPending.mockResolvedValueOnce(5);
 
-      const count = await sync.getSyncStatus();
-      expect(count.pendingCount).toBe(0); // queue counts are loaded in init
+      const status = sync.getSyncStatus(); // synchronous snapshot, no query
+      expect(queue.countPending).not.toHaveBeenCalled();
+      expect(status.pendingCount).toBe(0); // untouched until initSyncState runs
     });
   });
 

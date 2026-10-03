@@ -987,23 +987,37 @@ async function migrateV14(database: SQLite.SQLiteDatabase): Promise<void> {
     );
   `);
 
-  // 3. Migrate data: preserve ALL rows, deduplicate by (user_id, key) keeping latest updated_at.
-  //    Old table had key as PK (one row per key), but could have duplicates across user_ids.
-  //    New table enforces UNIQUE (user_id, key) — we keep the most recent per user+key.
-  //    For rows with NULL user_id, assign a placeholder to avoid collapsing them together.
+  // 3. Migrate data: the new table enforces UNIQUE (user_id, key), so legacy
+  //    duplicates (same owner + key) are deduped keeping the most recent
+  //    updated_at — but rows with a NULL/empty owner each get their OWN
+  //    placeholder (derived from their unique uuid) BEFORE ranking, so they
+  //    never collapse into one '__legacy_' bucket and every row survives.
+  //    updated_at is coalesced too: the column is NOT NULL in the new schema.
   await database.execAsync(`
+    WITH owned AS (
+      SELECT
+        uuid,
+        COALESCE(NULLIF(user_id, ''), '__legacy_' || uuid) AS user_id,
+        COALESCE(updated_at, datetime('now')) AS ts,
+        deleted_at,
+        COALESCE(version, 1) AS version,
+        key,
+        value
+      FROM settings_old
+      WHERE uuid IS NOT NULL
+    ),
+    ranked AS (
+      SELECT owned.*,
+             ROW_NUMBER() OVER (
+               PARTITION BY user_id, key
+               ORDER BY ts DESC, rowid DESC
+             ) AS rn
+      FROM owned
+    )
     INSERT INTO settings (uuid, user_id, created_at, updated_at, deleted_at, version, key, value)
-    SELECT
-      uuid,
-      COALESCE(NULLIF(user_id, ''), '__legacy_' || abs(random())) AS user_id,
-      COALESCE(updated_at, datetime('now')) AS created_at,
-      updated_at,
-      deleted_at,
-      COALESCE(version, 1) AS version,
-      key,
-      value
-    FROM settings_old
-    WHERE uuid IS NOT NULL
+    SELECT uuid, user_id, ts, ts, deleted_at, version, key, value
+    FROM ranked
+    WHERE rn = 1
   `);
 
   // 4. Drop old table

@@ -50,7 +50,7 @@ jest.mock('@/services/sync/events', () => ({
   emitRemoteWake: jest.fn(),
 }));
 
-type Realtime = typeof import('@/services/sync/realtime');
+type Realtime = typeof import('@/services/sync/realtime')['realtime'];
 
 interface ClientMock {
   getSupabaseClient: () => {

@@ -51,7 +51,7 @@ import { wipeDatabase } from '@/db/database';
 import { countUnresolvedConflicts } from '@/db/sync/conflict-repo';
 import { listSyncEvents } from '@/db/sync/history-repo';
 import { listSyncedDevices } from '@/db/sync/device-repo';
-import { countFailed, countPending, retryAll } from '@/db/sync/queue';
+import { countFailed, countPending, getPendingChanges, retryAll } from '@/db/sync/queue';
 import { resetSyncMeta } from '@/db/sync/meta';
 import { useLastSyncFrom } from '@/hooks/use-last-sync-from';
 import { useTheme } from '@/hooks/use-theme';
@@ -243,18 +243,43 @@ function CloudSyncCard() {
     }
   };
 
-  /** Shows detailed error info from the last sync run. */
-  const showLastSyncErrors = useCallback(() => {
-    if (!lastResult || lastResult.errors.length === 0) {
-      feedback.toast({ message: 'No errors in last sync.', tone: 'info' });
+  /**
+   * Shows diagnostics for failed uploads: the last run's error list plus any
+   * entries still parked in the queue (table, op, retries, last attempt).
+   * Pure callback — reads values from context already captured above, never
+   * calls `useSync()` again (hooks may only run in the component body).
+   */
+  const showLastSyncErrors = useCallback(async () => {
+    let parkedLines: string[] = [];
+    try {
+      const parked = (await getPendingChanges()).filter((entry) => entry.status === 'failed');
+      parkedLines = parked.map((entry) => {
+        const last = entry.lastAttemptAt ? ` · last ${formatLastSync(entry.lastAttemptAt)}` : '';
+        return `${entry.tableName} · ${entry.operation} · attempt ${entry.retryCount}${last}`;
+      });
+    } catch {
+      // Queue unavailable — fall back to the run result alone.
+    }
+
+    const runLines = (lastResult?.errors ?? []).map(
+      (e: SyncError) => `${e.table} · ${e.operation} · ${e.code ?? 'N/A'}: ${e.message}`
+    );
+
+    if (runLines.length === 0 && parkedLines.length === 0) {
+      feedback.toast({ message: 'No sync errors.', tone: 'info' });
       return;
     }
-    const errorLines = lastResult.errors.map((e: SyncError) =>
-      `${e.table} · ${e.operation} · ${e.code ?? 'N/A'}: ${e.message}`
-    );
+
+    const sections: string[] = [];
+    if (runLines.length > 0) {
+      sections.push(`Last run (${runLines.length}):\n${runLines.join('\n')}`);
+    }
+    if (parkedLines.length > 0) {
+      sections.push(`Waiting in queue (${parkedLines.length}):\n${parkedLines.join('\n')}`);
+    }
     feedback.alert({
-      title: `${lastResult.errors.length} sync error${lastResult.errors.length === 1 ? '' : 's'}`,
-      message: errorLines.join('\n\n'),
+      title: 'Sync errors',
+      message: sections.join('\n\n'),
     });
   }, [lastResult]);
 
@@ -316,13 +341,21 @@ function CloudSyncCard() {
 
   const handleForceRedownload = async () => {
     const confirmed = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const settle = (value: boolean) => {
+        if (!settled) {
+          settled = true;
+          resolve(value);
+        }
+      };
       Alert.alert(
         'Force Full Re-download',
         'This will clear all local pull cursors and re-download all data from the cloud. Any unsynced local changes will be overwritten by the cloud versions. Continue?',
         [
-          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Re-download', style: 'destructive', onPress: () => resolve(true) },
-        ]
+          { text: 'Cancel', style: 'cancel', onPress: () => settle(false) },
+          { text: 'Re-download', style: 'destructive', onPress: () => settle(true) },
+        ],
+        { onDismiss: () => settle(false) } // Android back/outside dismiss still settles
       );
     });
     if (!confirmed) return;
@@ -349,7 +382,7 @@ function CloudSyncCard() {
 
         <View style={[styles.cloudDivider, { backgroundColor: theme.border }]} />
 
-        <CloudInfoRow label="Connected Account" value={account} />
+        <CloudInfoRow label="Connected Account" value={account || 'Offline'} />
         <CloudInfoRow label="Last Sync" value={formatLastSync(lastSyncAt)} />
         <CloudInfoRow label="Sync Status" value={syncStatusLabel(status, syncing, lastSyncAt)} />
         <CloudInfoRow
@@ -491,12 +524,12 @@ function CloudSyncCard() {
             height={56}
           />
         ) : null}
-        {failedCount > 0 ? (
+        {failedCount > 0 || (lastResult?.errors.length ?? 0) > 0 ? (
           <LargeButton
             title="Show Sync Errors"
-            subtitle="See exactly why uploads failed"
+            subtitle="Failed queue entries & last run diagnostics"
             icon={AlertTriangle}
-            onPress={showLastSyncErrors}
+            onPress={() => void showLastSyncErrors()}
             variant="outline"
             height={56}
           />

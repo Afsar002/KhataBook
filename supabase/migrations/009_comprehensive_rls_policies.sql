@@ -8,6 +8,9 @@
 
 -- ---------------------------------------------------------------------------
 -- Helper: Drop all existing policies on a table (idempotent cleanup)
+-- Schema-qualified so cleanup never touches a same-named table in another
+-- schema (e.g. extensions or a shadow clone) and never errors when the table
+-- doesn't exist yet.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -16,11 +19,52 @@ DECLARE
 BEGIN
   FOR tbl IN SELECT unnest(ARRAY['accounts','categories','transactions','transfers','parties','party_transactions','settings'])
   LOOP
-    FOR pol IN EXECUTE format('SELECT policyname FROM pg_policies WHERE tablename = %L', tbl)
+    IF to_regclass('public.' || tbl) IS NULL THEN
+      CONTINUE;
+    END IF;
+    FOR pol IN EXECUTE format(
+      'SELECT policyname FROM pg_policies WHERE schemaname = %L AND tablename = %L',
+      'public', tbl
+    )
     LOOP
-      EXECUTE format('DROP POLICY IF EXISTS %I ON %I', pol, tbl);
+      EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', pol, tbl);
     END LOOP;
   END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Resolve ownerless records BEFORE enabling row-level security.
+-- Every policy below is `user_id = auth.uid()` — a row with a NULL/empty
+-- owner becomes invisible AND un-updatable for everyone (silent data loss in
+-- the UI, and push gets rejected by the WITH CHECK). Fail loudly so the
+-- operator assigns owners first instead of discovering orphaned rows later:
+--   SELECT * FROM <table> WHERE user_id IS NULL OR user_id = '';
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  tbl text;
+  orphans bigint;
+  offenders text := '';
+BEGIN
+  FOR tbl IN SELECT unnest(ARRAY['accounts','categories','transactions','transfers','parties','party_transactions','settings'])
+  LOOP
+    IF to_regclass('public.' || tbl) IS NULL THEN
+      CONTINUE;
+    END IF;
+    EXECUTE format(
+      'SELECT count(*) FROM public.%I WHERE user_id IS NULL OR user_id = %L',
+      tbl, ''
+    ) INTO orphans;
+    IF orphans > 0 THEN
+      offenders := offenders || format('%s (%s rows)', tbl, orphans) || ', ';
+    END IF;
+  END LOOP;
+
+  IF offenders <> '' THEN
+    RAISE EXCEPTION
+      'Ownerless rows found: %. Assign them to a user (or delete them) before enabling RLS — the user_id = auth.uid() policies would hide these rows from every client.',
+      left(offenders, -2);
+  END IF;
 END $$;
 
 -- ---------------------------------------------------------------------------

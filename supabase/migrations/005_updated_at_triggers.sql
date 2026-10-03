@@ -4,9 +4,12 @@
 -- stamps `updated_at` on every insert and update it sends (see
 -- src/db/transaction-repo.ts, src/db/sync/push.ts), and the cloud columns
 -- default to now(), so the pull cursor (`updated_at > last_pulled_at`) already
--- advances correctly. These triggers only protect against a future code path
--- that updates a row without setting updated_at — they never fire on INSERT,
--- so they do not affect newly created transactions.
+-- advances correctly.
+--
+-- The trigger PRESERVES an explicit `updated_at` supplied by the caller (the
+-- app's clock is authoritative for last-write-wins ordering); it only fills
+-- `now()` when the update left the column unchanged — so ad-hoc SQL edits
+-- still advance the pull cursor instead of silently re-using the old value.
 --
 -- Run this in the Supabase SQL Editor after 001_initial.sql. It is idempotent:
 -- the function is CREATE OR REPLACE and each trigger is DROP IF EXISTS first.
@@ -14,6 +17,9 @@
 create or replace function public.set_updated_at()
 returns trigger as $$
 begin
+  if new.updated_at is distinct from old.updated_at then
+    return new;      -- caller stamped its own value — preserve it
+  end if;
   new.updated_at = now();
   return new;
 end;

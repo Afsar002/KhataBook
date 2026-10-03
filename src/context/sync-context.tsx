@@ -5,31 +5,41 @@
  * the manual "Sync Now" action plus the auto-sync toggle. The engine stays the
  * single source of truth; this context only subscribes and forwards.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-
 import {
-  getSyncStatus,
-  initSyncState,
-  isSyncing,
-  onResult,
-  onStatusChange,
-  setAutoSync,
-  setIntervalMinutes,
-  setWifiOnly,
-  syncNow,
-  type SyncResult,
-  type SyncStatus,
-} from '@/services/sync/engine';
-import { getSupabaseClient } from '@/services/supabase/client';
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useState,
+    type ReactNode,
+} from "react";
+
+import { getSupabaseClient } from "@/services/supabase/client";
+import {
+    getSyncStatus,
+    initSyncState,
+    isSyncing,
+    onResult,
+    onStatusChange,
+    setAutoSync,
+    setIntervalMinutes,
+    setWifiOnly,
+    syncNow,
+    type SyncResult,
+    type SyncStatus,
+} from "@/services/sync/engine";
 
 interface SyncContextValue {
   status: SyncStatus;
   /** Outcome of the most recent sync run (pushed/pulled/failed/conflicts). */
   lastResult: SyncResult | null;
+  /** Shorthand for `status.lastSyncAt` — kept so existing callers don't drill. */
+  lastSyncAt: string | null;
   /** True while a sync run is in flight. */
   syncing: boolean;
-  /** Current realtime connection mode. */
-  realtimeMode: 'off' | 'connecting' | 'live' | 'degraded';
+  /** Current realtime connection mode (mirrors `status.realtimeMode`). */
+  realtimeMode: SyncStatus['realtimeMode'];
   /** Whether local edits auto-upload (off by default only if the user turns it off). */
   autoSync: boolean;
   setAutoSync: (value: boolean) => void;
@@ -54,9 +64,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     void initSyncState(getSupabaseClient);
 
     const unsubscribeStatus = onStatusChange((nextStatus) => {
-      console.log('[Sync Context] onStatusChange:', { state: nextStatus.state, lastSyncAt: nextStatus.lastSyncAt });
+      console.log("[Sync Context] onStatusChange:", {
+        state: nextStatus.state,
+        lastSyncAt: nextStatus.lastSyncAt,
+      });
       setStatus(nextStatus);
-      setSyncing(nextStatus.state === 'syncing');
+      setSyncing(nextStatus.state === "syncing");
     });
 
     const unsubscribeResult = onResult((result) => {
@@ -83,13 +96,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const runNow = useCallback(async () => {
-    await syncNow('manual', getSupabaseClient);
+    await syncNow("manual", getSupabaseClient);
   }, []);
 
   const value = useMemo(
     () => ({
       status,
       lastResult,
+      lastSyncAt: status.lastSyncAt,
       syncing,
       realtimeMode: status.realtimeMode,
       autoSync: status.autoSync,
@@ -108,7 +122,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       handleSetWifiOnly,
       handleSetIntervalMinutes,
       runNow,
-    ]
+    ],
   );
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;
@@ -117,7 +131,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 export function useSync(): SyncContextValue {
   const ctx = useContext(SyncContext);
   if (!ctx) {
-    throw new Error('useSync must be used within a SyncProvider');
+    throw new Error("useSync must be used within a SyncProvider");
   }
   return ctx;
 }

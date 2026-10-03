@@ -6,7 +6,7 @@
  * shared singleton mock, so per-test `mockResolvedValue` calls apply to the
  * exact instance the module under test uses.
  */
-import { countFailed, enqueueChange, purgeParked, retryAll } from '@/db/sync/queue';
+import { countFailed, countPending, enqueueChange, purgeParked, retryAll } from '@/db/sync/queue';
 
 type Db = Parameters<typeof enqueueChange>[0];
 
@@ -97,13 +97,35 @@ describe('Sync Queue', () => {
     });
 
     it('coalesces an existing row and lets a delete override an earlier update', async () => {
-      mockDb.getFirstAsync.mockResolvedValue({ id: 7 });
+      mockDb.getFirstAsync.mockResolvedValue({ id: 7, operation: 'update' });
 
-      await enqueueChange(mockDb as unknown as Db, 'transactions', 'uuid-3', 'update');
+      await enqueueChange(mockDb as unknown as Db, 'transactions', 'uuid-3', 'delete');
 
       const sql = mockDb.runAsync.mock.calls[0][0];
       expect(sql).toContain('UPDATE sync_queue');
-      expect(mockDb.runAsync.mock.calls[0][1]).toBe('update');
+      expect(mockDb.runAsync.mock.calls[0][1]).toBe('delete');
+    });
+
+    it('keeps a queued delete when a later insert/update is enqueued', async () => {
+      // The row is gone locally — a later snapshot must never resurrect it.
+      mockDb.getFirstAsync.mockResolvedValue({ id: 7, operation: 'delete' });
+
+      await enqueueChange(mockDb as unknown as Db, 'transactions', 'uuid-4', 'insert', { amount: 50 });
+
+      const sql = mockDb.runAsync.mock.calls[0][0];
+      expect(sql).toContain('UPDATE sync_queue');
+      expect(mockDb.runAsync.mock.calls[0][1]).toBe('delete');
+    });
+  });
+
+  describe('countPending', () => {
+    it('counts only pending rows — parked failures are excluded', async () => {
+      mockDb.getFirstAsync.mockResolvedValue({ count: 2 });
+
+      await expect(countPending()).resolves.toBe(2);
+
+      const sql = mockDb.getFirstAsync.mock.calls[0][0];
+      expect(sql).toContain("status = 'pending'");
     });
   });
 });

@@ -74,10 +74,11 @@ export async function restoreSession(): Promise<Session | null> {
     return null;
   }
   const { data } = await supabase.auth.getSession();
-  console.log('[Auth] Restored session user:', data.session?.user?.id, 'has token:', !!data.session?.access_token);
+  // Never log the raw user id — a presence flag is enough for diagnostics.
+  console.log('[Auth] Restored session:', data.session ? 'present' : 'absent', 'has token:', !!data.session?.access_token);
   setSession(data.session);
   supabase.auth.onAuthStateChange((event, session) => {
-    console.log('[Auth] State change:', event, 'user:', session?.user?.id, 'has token:', !!session?.access_token);
+    console.log('[Auth] State change:', event, 'session:', session ? 'present' : 'absent');
     setSession(session);
   });
   return data.session;

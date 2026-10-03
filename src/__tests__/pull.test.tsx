@@ -67,13 +67,19 @@ const queuedOp = {
   createdAt: '2026-01-01T00:00:00.000Z',
 };
 
-const makeSupabase = (rows: Record<string, unknown>[]) => ({
-  from: jest.fn(() => ({
-    select: jest.fn().mockReturnThis(),
-    order: jest.fn().mockResolvedValue({ data: rows, error: null }),
-    gt: jest.fn().mockResolvedValue({ data: rows, error: null }),
-  })),
-});
+/**
+ * Chainable fake of the Supabase query builder. `select/order/or` return the
+ * chain itself; `limit` terminates it (the pull code awaits `query.limit(...)`).
+ */
+const makeSupabase = (rows: Record<string, unknown>[]) => {
+  const chain: Record<string, jest.Mock> = {};
+  chain.select = jest.fn(() => chain);
+  chain.order = jest.fn(() => chain);
+  chain.or = jest.fn(() => chain);
+  chain.gt = jest.fn(() => chain);
+  chain.limit = jest.fn(() => Promise.resolve({ data: rows, error: null }));
+  return { from: jest.fn(() => chain) };
+};
 
 describe('pullRemoteChanges conflict detection', () => {
   beforeEach(() => {

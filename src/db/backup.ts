@@ -134,24 +134,17 @@ function backupVersionError(file: BackupFile): string | null {
 }
 
 /**
- * Sanitizes a value that might be an empty string, null, or invalid UUID.
- * Returns null for empty string, undefined, null, or invalid UUID-like strings.
+ * Resolves the owner for a restored row. Prefers the row's own valid UUID,
+ * falls back to the signed-in user's id, and returns null when neither
+ * exists so the caller can skip the row instead of violating NOT NULL.
  */
 function sanitizeUserId(value: unknown, fallbackUserId: string | null): string | null {
-  if (value === null || value === undefined) {
-    return fallbackUserId;
-  }
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    if (trimmed === '') {
-      return fallbackUserId;
-    }
-    // Basic UUID validation (allows standard UUID format)
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)) {
       return trimmed;
     }
-    // If it's some other string, treat as invalid and use fallback
-    return fallbackUserId;
+    // Empty/invalid stored id — fall through to the session fallback.
   }
   return fallbackUserId;
 }
@@ -238,23 +231,30 @@ async function getFallbackCategoryId(
 }
 
 /**
- * Sanitizes a row before insert:
- * - Converts empty-string user_id to current user's UUID or null
- * - Handles null/invalid category_id by mapping to fallback category
- * - Ensures FK IDs are valid integers
- * - Handles settings table's required user_id
+ * Validates one backup row before insert. Returns the sanitized row, or
+ * null when the row must be skipped:
+ * - `transactions` without a valid `account_id` (NOT NULL FK — nulling it
+ *   would violate the constraint, so the row is dropped and counted).
+ * - any synced row (incl. `settings`) whose owner resolves to null when no
+ *   session exists (user_id NOT NULL).
+ * `category_id` stays nullable (ON DELETE SET NULL) with a type fallback.
  */
 async function sanitizeRowForTable(
   db: ReturnType<typeof getDatabase>,
   table: string,
   row: BackupRow,
   fallbackUserId: string | null
-): Promise<BackupRow> {
+): Promise<BackupRow | null> {
   const sanitized = { ...row };
 
-  // 1. Sanitize user_id across all tables
-  if ('user_id' in sanitized) {
-    sanitized.user_id = sanitizeUserId(sanitized.user_id, fallbackUserId);
+  // Owner is NOT NULL on every synced table — without a session fallback the
+  // row cannot be restored, so skip it instead of violating the constraint.
+  if ('user_id' in sanitized || table === 'settings') {
+    const owner = sanitizeUserId(sanitized.user_id, fallbackUserId);
+    if (owner === null) {
+      return null;
+    }
+    sanitized.user_id = owner;
   }
 
   // 2. Table-specific FK sanitization
@@ -266,23 +266,27 @@ async function sanitizeRowForTable(
         // Try to assign a fallback category based on transaction type
         sanitized.category_id = await getFallbackCategoryId(db, sanitized.type as 'income' | 'expense');
       }
-      // account_id is required (NOT NULL FK)
-      sanitized.account_id = sanitizeFkId(sanitized.account_id);
+      // account_id is required (NOT NULL FK) — never null it; drop the row.
+      const accountId = sanitizeFkId(sanitized.account_id);
+      if (accountId === null) {
+        return null;
+      }
+      sanitized.account_id = accountId;
       break;
     }
     case 'transfers': {
       sanitized.from_account_id = sanitizeFkId(sanitized.from_account_id);
       sanitized.to_account_id = sanitizeFkId(sanitized.to_account_id);
+      if (sanitized.from_account_id === null || sanitized.to_account_id === null) {
+        return null;
+      }
       break;
     }
     case 'party_transactions': {
       sanitized.party_id = sanitizeFkId(sanitized.party_id);
-      break;
-    }
-    case 'settings': {
-      // settings table requires user_id NOT NULL (with UNIQUE(user_id, key))
-      // If the backup has empty string or missing user_id, use fallback
-      sanitized.user_id = sanitizeUserId(sanitized.user_id, fallbackUserId);
+      if (sanitized.party_id === null) {
+        return null;
+      }
       break;
     }
   }
@@ -341,7 +345,6 @@ export async function restoreBackup(file: BackupFile): Promise<RestoreResult> {
 
       for (const table of tableNames) {
         const columns = TABLE_COLUMNS[table];
-        const syncColumns = BACKUP_SYNC_COLUMNS.filter((c) => c !== 'uuid' && c !== 'updated_at'); // user_id, deleted_at, version
 
         // Build column list for INSERT OR REPLACE
         // We include sync columns to preserve uuid, user_id, deleted_at, version
@@ -353,9 +356,14 @@ export async function restoreBackup(file: BackupFile): Promise<RestoreResult> {
         const stmt = await db.prepareAsync(sql);
 
         try {
+          let skipped = 0;
           for (const row of file.tables[table] ?? []) {
-            // Sanitize the row before insert
+            // Sanitize the row before insert (null = must skip, counted below)
             const sanitized = await sanitizeRowForTable(db, table, row, fallbackUserId);
+            if (!sanitized) {
+              skipped += 1;
+              continue;
+            }
 
             const values: (string | number | null)[] = [];
 
@@ -400,17 +408,21 @@ export async function restoreBackup(file: BackupFile): Promise<RestoreResult> {
 
             try {
               await stmt.executeAsync(...values);
-              // Queue for sync so cloud gets the restored data
-              await enqueueChange(db, table, recordUuid, 'insert', null);
+              // Queue for sync so cloud gets the restored data. A restored
+              // tombstone (deleted_at set) must upload as a delete, or the
+              // cloud would resurrect a row the user had deleted.
+              const isTombstone =
+                typeof sanitized.deleted_at === 'string' && sanitized.deleted_at.length > 0;
+              await enqueueChange(db, table, recordUuid, isTombstone ? 'delete' : 'insert', null);
             } catch (insertError) {
-              // Log the specific row that failed (with its UUID for debugging)
-              console.error(
-                `[Restore] Failed to insert row into ${table} (uuid=${recordUuid}):`,
-                insertError
-              );
+              // Log the row key (uuid + table) without dumping row contents.
+              console.error(`[Restore] Failed to insert row into ${table} (uuid=${recordUuid})`);
               // Re-throw to trigger transaction rollback
               throw insertError;
             }
+          }
+          if (skipped > 0) {
+            console.warn(`[Restore] Skipped ${skipped} invalid row(s) in ${table} (bad FK or missing owner).`);
           }
         } finally {
           // Always finalize the prepared statement, even on error
@@ -422,9 +434,12 @@ export async function restoreBackup(file: BackupFile): Promise<RestoreResult> {
     const entries = (file.tables.transactions ?? []).length;
     const transfers = (file.tables.transfers ?? []).length;
     const parties = (file.tables.parties ?? []).length;
+    const message =
+      `Backup restored — ${entries} entries, ${transfers} transfers, ${parties} parties.` +
+      (fallbackUserId === null ? ' Signed out: rows without an owner were skipped.' : '');
     return {
       restored: true,
-      message: `Backup restored — ${entries} entries, ${transfers} transfers, ${parties} parties.`,
+      message,
       migrationNotice,
     };
   } catch (error) {

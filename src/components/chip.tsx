@@ -22,7 +22,7 @@ export function Chip({ label, selected, onPress, icon, style, disabled = false }
   const handlePress = () => {
     if (!disabled) {
       impact('light');
-      onPress();
+      onPress?.();
     }
   };
 

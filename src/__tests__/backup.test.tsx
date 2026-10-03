@@ -388,7 +388,7 @@ describe('Backup/Restore Module', () => {
       expect(result.migrationNotice).toBeUndefined();
     });
 
-    it('sanitizes empty-string user_id to null on accounts', async () => {
+    it('skips rows whose owner resolves to null when signed out', async () => {
       const mockBackup: BackupFile = {
         ...emptyBackup,
         tables: {
@@ -399,14 +399,20 @@ describe('Backup/Restore Module', () => {
         },
       };
 
-      await restoreBackup(mockBackup);
+      const result = await restoreBackup(mockBackup);
 
       const insertCalls = insertLog.filter((entry) => entry.sql.includes('INSERT OR REPLACE INTO accounts'));
-      const userIdIndex = TABLE_COLUMNS.accounts.length + 1; // uuid is index 6, user_id is 7
-      expect(insertCalls[0].values[userIdIndex]).toBeNull();
+      // user_id is NOT NULL — with no session fallback the row is skipped
+      // (not inserted with a null owner), and the caller is told about it.
+      expect(insertCalls).toHaveLength(0);
+      expect(result.restored).toBe(true);
+      expect(result.message).toContain('rows without an owner were skipped');
     });
 
-    it('sanitizes empty-string user_id to null on settings', async () => {
+    it('falls back to the signed-in user id for an empty user_id on settings', async () => {
+      const auth = require('@/services/supabase/auth');
+      auth.getCurrentSession.mockReturnValue({ user: { id: 'sess-user-1' } });
+
       const mockBackup: BackupFile = {
         ...emptyBackup,
         tables: {
@@ -421,7 +427,10 @@ describe('Backup/Restore Module', () => {
 
       const insertCalls = insertLog.filter((entry) => entry.sql.includes('INSERT OR REPLACE INTO settings'));
       const userIdIndex = TABLE_COLUMNS.settings.length + 1; // key, value, uuid, user_id...
-      expect(insertCalls[0].values[userIdIndex]).toBeNull();
+      expect(insertCalls).toHaveLength(1);
+      expect(insertCalls[0].values[userIdIndex]).toBe('sess-user-1');
+
+      auth.getCurrentSession.mockReturnValue(null);
     });
 
     it('handles null category_id on transactions without crashing', async () => {

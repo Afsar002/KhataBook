@@ -8,7 +8,7 @@
  * Lifecycle follows the auth session: `start()` on sign-in, `stop()` on sign-out.
  * Both are safe to call when cloud sync is not configured — they no-op.
  */
-import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+import type { RealtimeChannel, RealtimeChannelOptions, SupabaseClient } from '@supabase/supabase-js';
 
 import { SYNC_TABLES } from '@/db/sync/tables';
 import { getSupabaseClient } from '@/services/supabase/client';
@@ -54,7 +54,17 @@ function createController(): RealtimeController {
   }
 
   async function doSubscribe(supabase: SupabaseClient): Promise<void> {
-    if (stopping || channel) return;
+    if (stopping) return;
+    if (channel) {
+      // Tear down the previous (failed/closed) channel first — guarding on
+      // `channel` here is what made reconnect a permanent no-op before.
+      try {
+        await supabase.removeChannel(channel);
+      } catch {
+        // Best-effort; a dead channel removal failing is harmless.
+      }
+      channel = null;
+    }
 
     setMode('connecting');
 
@@ -72,16 +82,17 @@ function createController(): RealtimeController {
       }
     }
 
-    channel = supabase.channel(CHANNEL_NAME, {
+    const nextChannel = supabase.channel(CHANNEL_NAME, {
       config: {
         // Pin VSN 1.0.0 for React Native WebSocket compatibility
         // (VSN 2.0.0 uses binary ArrayBuffer frames that Android mishandles)
-        ...({ vsn: '1.0.0' } as Record<string, unknown>),
-      } as Record<string, unknown>,
-    } as Record<string, unknown>);
+        vsn: '1.0.0',
+      },
+    } as unknown as RealtimeChannelOptions);
+    channel = nextChannel;
 
     for (const spec of SYNC_TABLES) {
-      channel.on(
+      nextChannel.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: spec.table },
         () => {
@@ -90,7 +101,12 @@ function createController(): RealtimeController {
       );
     }
 
-    channel.subscribe((status, error) => {
+    nextChannel.subscribe((status, error) => {
+      // A stop() (or a newer subscribe) replaced this channel — ignore the
+      // late callback so it can't resurrect a stale mode/reconnect.
+      if (channel !== nextChannel) {
+        return;
+      }
       if (status === 'SUBSCRIBED') {
         console.log('[Realtime] SUBSCRIBED — live sync active');
         reconnectAttempt = 0;
@@ -101,11 +117,6 @@ function createController(): RealtimeController {
       if (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
         console.warn('[Realtime] subscribe failed:', errMsg);
-        console.warn(
-          '[Realtime] subscribe error (full):',
-          JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
-        );
-        console.warn('[Realtime] endpoint:', supabase.realtime.endPoint);
       }
 
       // Not subscribed (TIMED_OUT / CHANNEL_ERROR / CLOSED) — schedule reconnect
@@ -125,7 +136,9 @@ function createController(): RealtimeController {
     console.log(`[Realtime] scheduling reconnect in ${delay}ms (attempt ${reconnectAttempt})`);
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      if (!stopping && channel) {
+      // doSubscribe tears down any failed channel before resubscribing, so
+      // the old `channel !== null` guard no longer blocks the retry.
+      if (!stopping) {
         void doSubscribe(supabase);
       }
     }, delay);
@@ -134,11 +147,18 @@ function createController(): RealtimeController {
   return {
     async start(getClient: () => SupabaseClient | null = getSupabaseClient): Promise<void> {
       const supabase = getClient();
-      console.log('[Realtime] start() called, supabase:', !!supabase, 'channel:', !!channel, 'stopping:', stopping);
-      if (!supabase || channel) {
+      if (!supabase) {
         return;
       }
+      // Reset the stop flag first: `stopping` used to be cleared only after
+      // the `channel` guard, so a failed stop() made start() a permanent no-op.
       stopping = false;
+      // Already subscribed (or connecting) — nothing to do; a live channel is
+      // not torn down. Failed/closed channels are rebuilt by doSubscribe.
+      if (channel && mode !== 'degraded' && mode !== 'off') {
+        return;
+      }
+      // doSubscribe tears down any leftover channel before resubscribing.
       await doSubscribe(supabase);
     },
 

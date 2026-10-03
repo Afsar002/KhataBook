@@ -97,7 +97,6 @@ export async function pushPendingChanges(
             ...row,
             user_id: userId,
           };
-          console.log('[Push] Sending payload:', JSON.stringify(sentPayload, null, 2));
           const { error } = await supabase
             .from(entry.tableName)
             .upsert(sentPayload, { onConflict: 'id' });
@@ -111,16 +110,23 @@ export async function pushPendingChanges(
     } catch (error) {
       if (isAuthError(error)) {
         result.authError = true;
-        console.error('[Push] Auth error:', error);
+        // Allowlisted fields only — never dump the raw error object.
+        const authMessage = error instanceof Error ? error.message : String(error);
+        console.error('[Push] Auth error:', authMessage.slice(0, 200));
         return result; // stop — the session needs refreshing/re-auth
       }
 
       const { code, message } = extractErrorDetails(error);
 
-      console.error(`[Sync Push Failed] table=${entry.tableName} uuid=${entry.recordUuid} operation=${entry.operation}`);
-      console.error(`[Sync Push Failed] Supabase error:`, { code, message, fullError: error });
-      console.error(`[Sync Push Failed] Payload sent: ${JSON.stringify(sentPayload, null, 2)}`);
-      console.error(`[Sync Push Failed] Queued payload snapshot: ${entry.payload}`);
+      // Structured, allowlisted diagnostic record — no payloads, no raw
+      // error dumps (they can contain row contents or tokens).
+      console.error('[Sync Push Failed]', {
+        table: entry.tableName,
+        operation: entry.operation,
+        code: code ?? 'UNKNOWN',
+        message: message.slice(0, 300),
+        retryCount: entry.retryCount + 1,
+      });
 
       result.failed += 1;
       result.errors.push({

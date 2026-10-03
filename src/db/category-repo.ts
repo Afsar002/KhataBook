@@ -35,25 +35,31 @@ export async function listAllCategories(): Promise<Category[]> {
 export async function addCategory(input: NewCategory): Promise<number> {
   const db = getDatabase();
   const name = input.name.trim();
-  const orderRow = await db.getFirstAsync<{ next: number }>(
-    'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM categories WHERE type = ?',
-    input.type
-  );
   const recordUuid = uuid();
   const now = nowIso();
   const userId = getCurrentUserId();
-  const result = await db.runAsync(
-    'INSERT INTO categories (uuid, user_id, updated_at, name, type, icon, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    recordUuid,
-    userId,
-    now,
-    name,
-    input.type,
-    input.icon,
-    orderRow?.next ?? 0
-  );
-  await enqueueChange(db, 'categories', recordUuid, 'insert', { name, type: input.type, icon: input.icon });
-  return result.lastInsertRowId;
+  let categoryId = 0;
+  // Insert + queue atomically so a crash never leaves an unqueued category
+  // (which would silently never sync) or a queued op for a missing row.
+  await db.withTransactionAsync(async () => {
+    const orderRow = await db.getFirstAsync<{ next: number }>(
+      'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM categories WHERE type = ?',
+      input.type
+    );
+    const result = await db.runAsync(
+      'INSERT INTO categories (uuid, user_id, updated_at, name, type, icon, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      recordUuid,
+      userId,
+      now,
+      name,
+      input.type,
+      input.icon,
+      orderRow?.next ?? 0
+    );
+    categoryId = result.lastInsertRowId;
+    await enqueueChange(db, 'categories', recordUuid, 'insert', { name, type: input.type, icon: input.icon });
+  });
+  return categoryId;
 }
 
 export async function updateCategory(

@@ -13,16 +13,23 @@ export function useCashBook(date: string) {
   const [book, setBook] = useState<CashBook | null>(null);
   const [entries, setEntries] = useState<CashBookEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const [nextBook, nextEntries] = await Promise.all([
-      getCashBook(date),
-      getCashBookEntries(date),
-    ]);
-    setBook(nextBook);
-    setEntries(nextEntries);
-    setLoading(false);
+    setError(null);
+    try {
+      const [nextBook, nextEntries] = await Promise.all([
+        getCashBook(date),
+        getCashBookEntries(date),
+      ]);
+      setBook(nextBook);
+      setEntries(nextEntries);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
   }, [date]);
 
   useEffect(() => {
@@ -42,5 +49,5 @@ export function useCashBook(date: string) {
     await refresh();
   }, [date, refresh]);
 
-  return { book, entries, loading, refresh, saveCount, clearCount };
+  return { book, entries, loading, error, refresh, saveCount, clearCount };
 }

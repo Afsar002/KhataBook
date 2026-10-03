@@ -8,6 +8,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { getDatabase } from '@/db/database';
+import { emitQueueChange } from '@/services/sync/events';
 import type { SyncOperation } from '@/types';
 
 export interface QueuedChange {
@@ -15,7 +16,8 @@ export interface QueuedChange {
   tableName: string;
   recordUuid: string;
   operation: SyncOperation;
-  payload: Record<string, unknown>;
+  /** Raw JSON snapshot stored in SQLite — parsed by `getPendingChanges`. */
+  payload: string;
   status: 'pending' | 'failed';
   retryCount: number;
   createdAt: string;
@@ -27,9 +29,11 @@ export const MAX_RETRY_COUNT = 10;
 
 /**
  * Queues a change, coalescing so each (table, record uuid) has at most one
- * pending intent: a later operation replaces the earlier one and a delete
- * always wins. Call this inside the same transaction as the local write so
- * a failure rolls both back.
+ * pending intent: a later operation replaces the earlier one, except a
+ * queued delete is preserved until it uploads (otherwise an insert-after-
+ * delete would resurrect a row the user deleted). Notifies queue listeners
+ * so auto-sync can schedule an upload. Call this inside the same
+ * transaction as the local write so a failure rolls both back.
  */
 export async function enqueueChange(
   db: SQLiteDatabase,
@@ -43,14 +47,17 @@ export async function enqueueChange(
   // JS `null` so the write does not violate the constraint.
   const payloadJson = payload === undefined || payload === null ? '{}' : JSON.stringify(payload);
 
-  const existing = await db.getFirstAsync<{ id: number }>(
-    'SELECT id FROM sync_queue WHERE table_name = ? AND record_uuid = ?',
+  const existing = await db.getFirstAsync<{ id: number; operation: SyncOperation }>(
+    'SELECT id, operation FROM sync_queue WHERE table_name = ? AND record_uuid = ?',
     tableName,
     recordUuid
   );
 
   if (existing) {
-    const finalOp: SyncOperation = operation === 'delete' ? 'delete' : operation;
+    // A queued delete wins over a later insert/update: the row is gone
+    // locally, so the later snapshot would point at a missing row.
+    const finalOp: SyncOperation =
+      existing.operation === 'delete' || operation === 'delete' ? 'delete' : operation;
     await db.runAsync(
       `UPDATE sync_queue
          SET operation = ?, payload = ?, status = 'pending', retry_count = 0, last_attempt_at = NULL
@@ -68,6 +75,7 @@ export async function enqueueChange(
       payloadJson
     );
   }
+  emitQueueChange();
 }
 
 /** Pending + failed operations, oldest first. */
@@ -83,9 +91,10 @@ export async function getPendingChanges(
   );
 }
 
-/** Removes a successfully uploaded operation. */
+/** Removes a successfully uploaded operation. Emits so badges stay current. */
 export async function markDone(id: number, db: SQLiteDatabase = getDatabase()): Promise<void> {
   await db.runAsync('DELETE FROM sync_queue WHERE id = ?', id);
+  emitQueueChange();
 }
 
 /** Marks an operation as failed and bumps its retry counter. */
@@ -102,17 +111,19 @@ export async function markFailed(
     new Date().toISOString(),
     id
   );
+  emitQueueChange();
 }
 
 /** Drops every queued operation (used when the user changes). */
 export async function clearQueue(db: SQLiteDatabase = getDatabase()): Promise<void> {
   await db.runAsync('DELETE FROM sync_queue');
+  emitQueueChange();
 }
 
-/** Number of operations waiting to upload (for status badges). */
+/** Number of operations still waiting to upload — excludes parked failures. */
 export async function countPending(db: SQLiteDatabase = getDatabase()): Promise<number> {
   const row = await db.getFirstAsync<{ count: number }>(
-    'SELECT COUNT(*) AS count FROM sync_queue'
+    "SELECT COUNT(*) AS count FROM sync_queue WHERE status = 'pending'"
   );
   return row?.count ?? 0;
 }
@@ -135,12 +146,15 @@ export async function retryAll(db: SQLiteDatabase = getDatabase()): Promise<numb
        SET status = 'pending', retry_count = 0, last_attempt_at = NULL
      WHERE status = 'failed'`
   );
+  emitQueueChange();
   return result.changes;
 }
 
 /**
  * Deletes parked operations whose last attempt is older than `maxAgeDays`, so
  * a queue with long-unfixable failures never grows unbounded. Call on boot.
+ * Only rows that were actually attempted (`last_attempt_at IS NOT NULL`) are
+ * purged — unsynced user changes that never got an attempt are preserved.
  * Returns the number of rows purged.
  */
 export async function purgeParked(maxAgeDays = 30, db: SQLiteDatabase = getDatabase()): Promise<number> {

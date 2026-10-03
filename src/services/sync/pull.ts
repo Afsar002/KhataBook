@@ -88,23 +88,61 @@ function toLocalRow(
   return row;
 }
 
-async function fetchRemote(
+/** Page size for one pull batch — keeps large tables under query limits. */
+const PULL_PAGE_SIZE = 500;
+
+/** A pull-cursor position: (updated_at, id) keyset pair. */
+interface CursorPos {
+  updatedAt: string;
+  id: string;
+}
+
+/** Compares two keyset positions so pagination advances deterministically. */
+function comparePos(a: CursorPos, b: CursorPos): number {
+  if (a.updatedAt !== b.updatedAt) {
+    return a.updatedAt < b.updatedAt ? -1 : 1;
+  }
+  if (a.id !== b.id) {
+    return a.id < b.id ? -1 : 1;
+  }
+  return 0;
+}
+
+/** Parses the stored cursor (`updated_at|id`; legacy value = `updated_at`). */
+function parseCursorPos(stored: string): CursorPos | null {
+  if (!stored) {
+    return null;
+  }
+  const [updatedAt, id] = stored.split('|');
+  return updatedAt ? { updatedAt, id: id ?? '' } : null;
+}
+
+async function fetchRemotePage(
   supabase: SupabaseClient,
   table: string,
-  cursor: string
+  cursor: CursorPos | null
 ): Promise<Record<string, unknown>[]> {
-  let query = supabase.from(table).select('*').order('updated_at', { ascending: true });
+  let query = supabase
+    .from(table)
+    .select('*')
+    .order('updated_at', { ascending: true })
+    .order('id', { ascending: true });
   if (cursor) {
-    query = query.gt('updated_at', cursor);
+    // Keyset on (updated_at, id): strictly after the last applied row, so
+    // rows sharing the same updated_at can't loop or be skipped.
+    query = query.or(
+      `updated_at.gt."${cursor.updatedAt}",and(updated_at.eq."${cursor.updatedAt}",id.gt."${cursor.id}")`
+    );
   }
-  const { data, error } = await query;
+  const { data, error } = await query.limit(PULL_PAGE_SIZE);
   if (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error(`[Sync Pull Fetch Failed] table=${table} error=${errMsg}`);
     throw error;
   }
-  console.log(`[Sync Pull] table=${table} cursor=${cursor} fetched=${data?.length ?? 0} rows`);
-  return (data ?? []) as Record<string, unknown>[];
+  const rows = (data ?? []) as Record<string, unknown>[];
+  console.log(`[Sync Pull] table=${table} fetched=${rows.length} rows`);
+  return rows;
 }
 
 function extractErrorDetails(error: unknown): { code?: string; message: string } {
@@ -150,15 +188,12 @@ export async function pullRemoteChanges(
     if (!spec) {
       continue;
     }
-    const cursor = (await getMeta(cursorKey(table))) ?? '';
-    let remoteRows: Record<string, unknown>[];
-    try {
-      remoteRows = await fetchRemote(supabase, table, cursor);
-    } catch (error) {
-      const { code, message } = extractErrorDetails(error);
-      result.errors.push({ table, uuid: '', operation: 'pull', code, message });
-      continue; // continue with next table
-    }
+    // Resume strictly after the last applied row: (updated_at, id) keyset so
+    // rows sharing an updated_at can't loop or be skipped.
+    let pageCursor = parseCursorPos((await getMeta(cursorKey(table))) ?? '');
+    // Highest position applied cleanly this run — the checkpoint never moves
+    // past a row that needs a retry (missing parent / apply error).
+    let appliedPos = pageCursor;
 
     // Build uuid→id maps for ALL parent tables this table references
     // (not just the current table). These are needed by toLocalRow() to
@@ -169,101 +204,130 @@ export async function pullRemoteChanges(
       const parentMap = await loadUuidToIdMap(parentTable);
       Object.assign(uuidToId, parentMap);
     }
-    console.log(`[Sync Pull] table=${table} cursor=${cursor} uuidToIdKeys=${Object.keys(uuidToId).length} rowsToProcess=${remoteRows.length}`);
+    console.log(
+      `[Sync Pull] table=${table} cursor=${pageCursor ? `${pageCursor.updatedAt}|${pageCursor.id}` : '(start)'} parents=${parentTables.length}`
+    );
 
-    let lastUpdatedAt = cursor;
-
-    for (const remote of remoteRows) {
-      const remoteUpdatedAt = remote.updated_at as string;
-      if (remoteUpdatedAt && remoteUpdatedAt > lastUpdatedAt) {
-        lastUpdatedAt = remoteUpdatedAt;
-      }
-
-      // Fetch the full row so a conflict can snapshot the local version instead
-      // of silently discarding it.
-      const local = await db.getFirstAsync<Record<string, unknown> | null>(
-        `SELECT * FROM ${table} WHERE uuid = ?`,
-        String(remote.id)
-      );
-
-      console.log(`[Sync Pull] table=${table} uuid=${remote.id} remoteUpdatedAt=${remoteUpdatedAt} localExists=${!!local} localUpdatedAt=${local?.updated_at ?? 'null'} isTombstone=${Boolean(remote.deleted_at)} queued=${queuedKeys.has(`${table}:${String(remote.id)}`)}`);
-
-      const isTombstone = Boolean(remote.deleted_at);
-
-      if (isTombstone) {
-        if (local) {
-          const localKey = spec.table === 'settings' ? local.key : local.id;
-          if (localKey !== undefined) {
-            const queuedKey = `${table}:${String(remote.id)}`;
-            if (queuedKeys.has(queuedKey)) {
-              result.conflicts += 1;
-              const message = `A ${labelFor(table)} deleted on another device removed an unsynced local change.`;
-              await addSyncEvent('conflict', message);
-              await addConflictRecord({
-                tableName: table,
-                recordUuid: String(remote.id),
-                message,
-                localJson: JSON.stringify(local),
-                remoteJson: null,
-              });
-            }
-            try {
-              await deleteLocalRow(db, spec, localKey as string | number);
-              result.deleted += 1;
-            } catch (error) {
-              const { code, message } = extractErrorDetails(error);
-              result.errors.push({ table, uuid: String(remote.id), operation: 'delete', code, message });
-            }
-          }
-        }
-        continue;
-      }
-
-      const localUpdatedAt = (local?.updated_at as string | null) ?? null;
-      // Last-write-wins: only apply when the remote row is newer.
-      if (local && localUpdatedAt && localUpdatedAt >= remoteUpdatedAt) {
-        console.log(`[Sync Pull] SKIPPED (local newer or equal) table=${table} uuid=${remote.id} localUpdatedAt=${localUpdatedAt} remoteUpdatedAt=${remoteUpdatedAt}`);
-        result.skipped += 1;
-        continue;
-      }
-
-      const localRow = toLocalRow(spec, remote, uuidToId);
-      if (!localRow) {
-        console.log(`[Sync Pull] SKIPPED (missing parent) table=${table} uuid=${remote.id}`);
-        result.skipped += 1; // missing parent — resolved on a later pull
-        continue;
-      }
-
+    // Page through the table until exhausted or a row needs a retry.
+    for (;;) {
+      let remoteRows: Record<string, unknown>[];
       try {
-        if (local) {
-          const queuedKey = `${table}:${String(remote.id)}`;
-          if (queuedKeys.has(queuedKey)) {
-            result.conflicts += 1;
-            const message = `A newer ${labelFor(table)} from the cloud replaced an unsynced local change.`;
-            await addSyncEvent('conflict', message);
-            await addConflictRecord({
-              tableName: table,
-              recordUuid: String(remote.id),
-              message,
-              localJson: JSON.stringify(local),
-              remoteJson: JSON.stringify(remote),
-            });
-          }
-          await updateLocalRow(db, spec, localRow);
-          result.updated += 1;
-        } else {
-          await insertLocalRow(db, spec, localRow);
-          result.inserted += 1;
-        }
+        remoteRows = await fetchRemotePage(supabase, table, pageCursor);
       } catch (error) {
         const { code, message } = extractErrorDetails(error);
-        result.errors.push({ table, uuid: String(remote.id), operation: local ? 'update' : 'insert', code, message });
+        result.errors.push({ table, uuid: '', operation: 'pull', code, message });
+        break; // keep the checkpoint — refetch this table next pull
       }
-    }
+      if (remoteRows.length === 0) {
+        break;
+      }
 
-    // Advance the cursor only after the whole table batch applied cleanly.
-    if (lastUpdatedAt !== cursor) {
-      await setMeta(cursorKey(table), lastUpdatedAt);
+      let retryNeeded = false;
+
+      for (const remote of remoteRows) {
+        const remoteUpdatedAt = String(remote.updated_at ?? '');
+        const remotePos: CursorPos = { updatedAt: remoteUpdatedAt, id: String(remote.id ?? '') };
+
+        // Fetch the full row so a conflict can snapshot the local version instead
+        // of silently discarding it.
+        const local = await db.getFirstAsync<Record<string, unknown> | null>(
+          `SELECT * FROM ${table} WHERE uuid = ?`,
+          String(remote.id)
+        );
+
+        const isTombstone = Boolean(remote.deleted_at);
+        const localUpdatedAt = (local?.updated_at as string | null) ?? null;
+
+        if (local && localUpdatedAt && localUpdatedAt >= remoteUpdatedAt) {
+          // Last-write-wins FIRST — even for tombstones: a newer local edit
+          // beats a stale remote delete (the local row pushes and wins).
+          result.skipped += 1;
+        } else if (isTombstone) {
+          if (local) {
+            const localKey = spec.table === 'settings' ? local.key : local.id;
+            if (localKey !== undefined) {
+              const queuedKey = `${table}:${String(remote.id)}`;
+              if (queuedKeys.has(queuedKey)) {
+                result.conflicts += 1;
+                const message = `A ${labelFor(table)} deleted on another device removed an unsynced local change.`;
+                await addSyncEvent('conflict', message);
+                await addConflictRecord({
+                  tableName: table,
+                  recordUuid: String(remote.id),
+                  message,
+                  localJson: JSON.stringify(local),
+                  remoteJson: null,
+                });
+              }
+              try {
+                await deleteLocalRow(db, spec, localKey as string | number);
+                result.deleted += 1;
+              } catch (error) {
+                const { code, message } = extractErrorDetails(error);
+                result.errors.push({ table, uuid: String(remote.id), operation: 'delete', code, message });
+                retryNeeded = true; // don't checkpoint past a failed delete
+                break;
+              }
+            }
+          }
+        } else {
+          const localRow = toLocalRow(spec, remote, uuidToId);
+          if (!localRow) {
+            result.skipped += 1; // missing parent — resolved on a later pull
+            retryNeeded = true; // don't checkpoint past an unresolvable row
+            break;
+          }
+
+          try {
+            if (local) {
+              const queuedKey = `${table}:${String(remote.id)}`;
+              if (queuedKeys.has(queuedKey)) {
+                result.conflicts += 1;
+                const message = `A newer ${labelFor(table)} from the cloud replaced an unsynced local change.`;
+                await addSyncEvent('conflict', message);
+                await addConflictRecord({
+                  tableName: table,
+                  recordUuid: String(remote.id),
+                  message,
+                  localJson: JSON.stringify(local),
+                  remoteJson: JSON.stringify(remote),
+                });
+              }
+              await updateLocalRow(db, spec, localRow);
+              result.updated += 1;
+            } else {
+              await insertLocalRow(db, spec, localRow);
+              result.inserted += 1;
+            }
+          } catch (error) {
+            const { code, message } = extractErrorDetails(error);
+            result.errors.push({ table, uuid: String(remote.id), operation: local ? 'update' : 'insert', code, message });
+            retryNeeded = true; // don't checkpoint past a failed apply
+            break;
+          }
+        }
+
+        // This row is handled — it is safe for the cursor to pass it.
+        if (!appliedPos || comparePos(appliedPos, remotePos) < 0) {
+          appliedPos = remotePos;
+        }
+      }
+
+      // Persist the checkpoint: everything up to (and including) the last
+      // cleanly-applied row; a retry-needed row sits right after it.
+      if (appliedPos) {
+        await setMeta(cursorKey(table), `${appliedPos.updatedAt}|${appliedPos.id}`);
+      }
+      if (retryNeeded) {
+        break; // refetch from the failed row on the next pull
+      }
+
+      const last = remoteRows[remoteRows.length - 1];
+      if (!last || remoteRows.length < PULL_PAGE_SIZE) {
+        break; // last page
+      }
+      // Advance to the next page (keyset from the last fetched row).
+      pageCursor = { updatedAt: String(last.updated_at ?? ''), id: String(last.id ?? '') };
     }
   }
 

@@ -106,8 +106,13 @@ export function CalculatorInput({
   // Live evaluation
   const liveResult = evaluateExpression(expression);
   const hasValidResult = isFinite(liveResult) && !isNaN(liveResult);
+  const invalid = expression.length > 0 && !hasValidResult;
 
   const handleKeyPress = (key: string) => {
+    // Every path (including 'C' / backspace / '=') must respect `disabled` —
+    // the backdrop press can reach here even when the input is disabled.
+    if (disabled) return;
+
     let newExpression = expression;
 
     switch (key) {
@@ -126,7 +131,6 @@ export function CalculatorInput({
         hideKeypad();
         return;
       case 'submit': // Internal: submit without hiding (for backdrop tap)
-        if (disabled) return;
         if (hasValidResult) {
           const formatted = formatResult(liveResult);
           setExpression(formatted);
@@ -135,7 +139,6 @@ export function CalculatorInput({
         return;
       default:
         // Numbers, operators, decimal
-        if (disabled) return;
         // Prevent multiple operators in a row
         const lastChar = expression.slice(-1);
         const isOperator = ['+', '-', '×', '÷'].includes(key);
@@ -172,8 +175,18 @@ export function CalculatorInput({
         <Pressable
           onPress={handleFocus}
           disabled={disabled}
-          accessibilityRole="none"
-          accessibilityLabel={accessibilityLabel}
+          accessibilityRole="button"
+          accessibilityLabel={
+            expression
+              ? `${accessibilityLabel}: ${invalid ? `invalid expression ${expression}` : expression}`
+              : accessibilityLabel
+          }
+          accessibilityHint={
+            invalid
+              ? 'The expression cannot be evaluated — clear it or fix it.'
+              : 'Opens the calculator keypad.'
+          }
+          aria-invalid={invalid}
           style={({ pressed }) => [
             styles.inputArea,
             pressed && { opacity: 0.8 },
@@ -239,7 +252,10 @@ export function CalculatorInput({
               handleKeyPress('submit');
               hideKeypad();
             }}
-            accessibilityLabel="Close keypad and submit amount"
+            accessibilityRole="button"
+            accessibilityLabel={
+              hasValidResult ? 'Close keypad and submit amount' : 'Close keypad'
+            }
             hitSlop={{ top: 0, left: 0, right: 0, bottom: 0 }}
           />
           {/* Keypad sheet — full width, 40% of screen height */}

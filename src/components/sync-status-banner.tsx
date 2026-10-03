@@ -1,5 +1,5 @@
 import { View, StyleSheet } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WifiOff, RefreshCw, CheckCircle, AlertCircle, Info, CloudOff } from 'lucide-react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -113,11 +113,8 @@ export function SyncStatusBanner() {
   }
 
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-      edges={['top', 'left', 'right']}
-    >
-      <View style={[styles.banner, { backgroundColor: config.bgColor, paddingTop: insets.top + Spacing.two }]}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
+      <View style={[styles.banner, { backgroundColor: config.bgColor }]}>
         <View style={styles.content}>
           <Icon size={18} color={config.iconColor} style={styles.icon} />
           <View style={styles.textContainer}>
@@ -145,7 +142,7 @@ export function SyncStatusBanner() {
           )}
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

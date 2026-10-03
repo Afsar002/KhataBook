@@ -42,7 +42,11 @@ function adapter(db: DatabaseSync): SQLiteDatabase {
   } as unknown as SQLiteDatabase;
 }
 
-/** Minimal transactions table — `listDaySummaries` only reads date/type/amount. */
+/**
+ * Minimal fixture for `listDaySummaries`. It reads transactions for the day's
+ * income/expense net, and joins `accounts` + `transfers` for the cash transfer
+ * legs — so all three tables must exist even when only transactions are seeded.
+ */
 function freshDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
   db.exec(`
@@ -53,6 +57,19 @@ function freshDb(): DatabaseSync {
       note TEXT NOT NULL DEFAULT '',
       date TEXT NOT NULL,
       kind TEXT NOT NULL DEFAULT 'normal'
+    );
+    CREATE TABLE accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      opening_balance REAL NOT NULL DEFAULT 0
+    );
+    CREATE TABLE transfers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      amount REAL NOT NULL,
+      from_account_id INTEGER NOT NULL,
+      to_account_id INTEGER NOT NULL,
+      date TEXT NOT NULL
     );
   `);
   return db;
@@ -206,7 +223,7 @@ describe('listDaySummaries — real SQLite', () => {
     });
   });
 
-  it('latest-day cashInHand equals the sum of all account balances (transfers cancel)', async () => {
+  it('latest-day cashInHand = all-transaction net + cash-involving transfer legs', async () => {
     const { getDatabase } = require('@/db/database');
     const db = new DatabaseSync(':memory:');
     db.exec(`
@@ -252,24 +269,28 @@ describe('listDaySummaries — real SQLite', () => {
     getDatabase.mockReturnValue(adapter(db));
 
     const [latest] = await listDaySummaries();
-    expect(latest.cashInHand).toBe(3200); // 3000 openings − 100 expense + 300 income
+    // 3200 transaction net (3000 openings − 100 expense + 300 income) − 500
+    // cash→bank transfer (cash leaves the book). A cash↔cash transfer would
+    // cancel out; a cash↔bank move changes cash in hand.
+    expect(latest.cashInHand).toBe(2700);
 
-    // Account balances (BALANCE_SQL equivalent): transfers net to zero across
-    // accounts, so the sum must equal the cumulative ledger total.
-    const balanceRows = db
+    // Independent re-derivation of the same definition (all transactions net
+    // plus the cash-involving transfer legs) must agree with the query.
+    const row = db
       .prepare(
         `SELECT
            COALESCE((SELECT SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END)
-                     FROM transactions t WHERE t.account_id = a.id), 0)
-           + COALESCE((SELECT SUM(amount) FROM transfers tr WHERE tr.to_account_id = a.id), 0)
-           - COALESCE((SELECT SUM(amount) FROM transfers tr WHERE tr.from_account_id = a.id), 0)
-           AS balance
-         FROM accounts a`
+                     FROM transactions t), 0)
+           + COALESCE((SELECT SUM(tr.amount) FROM transfers tr
+                       JOIN accounts ta ON ta.id = tr.to_account_id
+                       WHERE ta.type = 'cash'), 0)
+           - COALESCE((SELECT SUM(tr.amount) FROM transfers tr
+                       JOIN accounts fa ON fa.id = tr.from_account_id
+                       WHERE fa.type = 'cash'), 0)
+           AS cashInHand`
       )
-      .all() as { balance: number }[];
-    const total = balanceRows.reduce((sum, r) => sum + r.balance, 0);
-    expect(total).toBe(3200);
-    expect(latest.cashInHand).toBe(total);
+      .get() as { cashInHand: number };
+    expect(latest.cashInHand).toBe(row.cashInHand);
   });
 
   it('omits bounds SQL when both are undefined', async () => {
@@ -281,7 +302,11 @@ describe('listDaySummaries — real SQLite', () => {
     await listDaySummaries();
 
     const [sql, ...params] = getAllAsync.mock.calls[0];
-    expect(sql).not.toContain('WHERE');
+    // No date bounds are appended when from/to are omitted (the `day_transfers`
+    // CTE has its own cash-involvement WHERE, which is not a range filter)…
+    expect(sql).not.toContain('date >= ? AND date <= ?');
+    expect(sql).not.toContain('WHERE date >=');
+    // …and no bound params are bound.
     expect(params).toHaveLength(0);
   });
 });
