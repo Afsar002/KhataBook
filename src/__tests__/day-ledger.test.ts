@@ -8,28 +8,29 @@
  * the query is bounded (Cashbook's "Cash in Hand" is the cumulative running
  * balance over ALL days, not just the visible range).
  */
-import { DatabaseSync } from 'node:sqlite';
-import type { SQLiteDatabase } from 'expo-sqlite';
+ 
+import type { SQLiteDatabase } from "expo-sqlite";
+import { DatabaseSync } from "node:sqlite";
 
 import {
-  getDayLedgerSummary,
-  getRunningBalance,
-  listDaySummaries,
-  runningCashInHand,
-  type DayLedgerSummary,
-} from '@/db/transaction-repo';
+    getDayLedgerSummary,
+    getRunningBalance,
+    listDaySummaries,
+    runningCashInHand,
+    type DayLedgerSummary,
+} from "@/db/transaction-repo";
 
-jest.mock('@/db/database', () => ({
+jest.mock("@/db/database", () => ({
   getDatabase: jest.fn(),
-  nowIso: jest.fn(() => '2026-08-11T00:00:00.000Z'),
+  nowIso: jest.fn(() => "2026-08-11T00:00:00.000Z"),
 }));
 
-jest.mock('@/db/sync/queue', () => ({
+jest.mock("@/db/sync/queue", () => ({
   enqueueChange: jest.fn(),
 }));
 
-jest.mock('@/services/supabase/auth', () => ({
-  getCurrentUserId: jest.fn().mockReturnValue('user-id'),
+jest.mock("@/services/supabase/auth", () => ({
+  getCurrentUserId: jest.fn().mockReturnValue("user-id"),
 }));
 
 /** node:sqlite has no async helpers — adapt it to the expo-sqlite shape. */
@@ -48,7 +49,7 @@ function adapter(db: DatabaseSync): SQLiteDatabase {
  * legs — so all three tables must exist even when only transactions are seeded.
  */
 function freshDb(): DatabaseSync {
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   db.exec(`
     CREATE TABLE transactions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,26 +79,26 @@ function freshDb(): DatabaseSync {
 /** `id`, `type`, `amount`, `date`, optional `kind` (default 'normal'). */
 function seed(
   db: DatabaseSync,
-  rows: { type: string; amount: number; date: string; kind?: string }[]
+  rows: { type: string; amount: number; date: string; kind?: string }[],
 ): void {
   const stmt = db.prepare(
-    'INSERT INTO transactions (type, amount, note, date, kind) VALUES (?, ?, ?, ?, ?)'
+    "INSERT INTO transactions (type, amount, note, date, kind) VALUES (?, ?, ?, ?, ?)",
   );
   for (const r of rows) {
-    stmt.run(r.type, r.amount, '', r.date, r.kind ?? 'normal');
+    stmt.run(r.type, r.amount, "", r.date, r.kind ?? "normal");
   }
 }
 
-describe('listDaySummaries — real SQLite', () => {
+describe("listDaySummaries — real SQLite", () => {
   /** Cash in Hand 08-01 = 400 → 08-02 = 350 → 08-03 = 550 (opening entry counts as income). */
   function seededDb(): DatabaseSync {
     const db = freshDb();
     seed(db, [
-      { type: 'income', amount: 500, date: '2026-08-01' },
-      { type: 'expense', amount: 100, date: '2026-08-01' },
-      { type: 'expense', amount: 50, date: '2026-08-02' },
+      { type: "income", amount: 500, date: "2026-08-01" },
+      { type: "expense", amount: 100, date: "2026-08-01" },
+      { type: "expense", amount: 50, date: "2026-08-02" },
       // Opening-balance entries are type='income' — they feed Cash in Hand.
-      { type: 'income', amount: 200, date: '2026-08-03', kind: 'opening' },
+      { type: "income", amount: 200, date: "2026-08-03", kind: "opening" },
     ]);
     return db;
   }
@@ -106,101 +107,133 @@ describe('listDaySummaries — real SQLite', () => {
     jest.clearAllMocks();
   });
 
-  it('returns one newest-first row per day with income/expense/entryCount', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("returns one newest-first row per day with income/expense/entryCount", async () => {
+    const { getDatabase } = require("@/db/database");
     getDatabase.mockReturnValue(adapter(seededDb()));
 
     await expect(listDaySummaries()).resolves.toEqual([
-      { date: '2026-08-03', entryCount: 1, income: 200, expense: 0, cashInHand: 550 },
-      { date: '2026-08-02', entryCount: 1, income: 0, expense: 50, cashInHand: 350 },
-      { date: '2026-08-01', entryCount: 2, income: 500, expense: 100, cashInHand: 400 },
+      {
+        date: "2026-08-03",
+        entryCount: 1,
+        income: 200,
+        expense: 0,
+        cashInHand: 550,
+      },
+      {
+        date: "2026-08-02",
+        entryCount: 1,
+        income: 0,
+        expense: 50,
+        cashInHand: 350,
+      },
+      {
+        date: "2026-08-01",
+        entryCount: 2,
+        income: 500,
+        expense: 100,
+        cashInHand: 400,
+      },
     ]);
   });
 
-  it('bounded range carries the pre-range cashInHand balance in', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("bounded range carries the pre-range cashInHand balance in", async () => {
+    const { getDatabase } = require("@/db/database");
     getDatabase.mockReturnValue(adapter(seededDb()));
 
-    const rows = await listDaySummaries('2026-08-02', '2026-08-03');
+    const rows = await listDaySummaries("2026-08-02", "2026-08-03");
     // Only the two in-range days are returned…
-    expect(rows.map((r) => r.date)).toEqual(['2026-08-03', '2026-08-02']);
+    expect(rows.map((r) => r.date)).toEqual(["2026-08-03", "2026-08-02"]);
     // …but their cashInHand still folds in 08-01's 400 (400 − 50 = 350).
     expect(rows.map((r) => r.cashInHand)).toEqual([550, 350]);
     expect(rows[1].income).toBe(0);
     expect(rows[1].expense).toBe(50);
   });
 
-  it('single-day range returns just that day with the full running balance', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("single-day range returns just that day with the full running balance", async () => {
+    const { getDatabase } = require("@/db/database");
     getDatabase.mockReturnValue(adapter(seededDb()));
 
-    await expect(listDaySummaries('2026-08-02', '2026-08-02')).resolves.toEqual([
-      { date: '2026-08-02', entryCount: 1, income: 0, expense: 50, cashInHand: 350 },
-    ]);
+    await expect(listDaySummaries("2026-08-02", "2026-08-02")).resolves.toEqual(
+      [
+        {
+          date: "2026-08-02",
+          entryCount: 1,
+          income: 0,
+          expense: 50,
+          cashInHand: 350,
+        },
+      ],
+    );
   });
 
-  it('empty table returns no rows', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("empty table returns no rows", async () => {
+    const { getDatabase } = require("@/db/database");
     getDatabase.mockReturnValue(adapter(freshDb()));
 
     await expect(listDaySummaries()).resolves.toEqual([]);
   });
 
-  it('passes both bounds as SQL params (no injection of an unbounded query)', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("passes both bounds as SQL params (no injection of an unbounded query)", async () => {
+    const { getDatabase } = require("@/db/database");
     const db = freshDb();
-    seed(db, [{ type: 'income', amount: 10, date: '2026-08-05' }]);
+    seed(db, [{ type: "income", amount: 10, date: "2026-08-05" }]);
     const dbAdapter = adapter(db);
     const getAllAsync = jest.fn(dbAdapter.getAllAsync);
     getDatabase.mockReturnValue({ ...dbAdapter, getAllAsync });
 
-    await listDaySummaries('2026-08-01', '2026-08-31');
+    await listDaySummaries("2026-08-01", "2026-08-31");
 
     expect(getAllAsync).toHaveBeenCalledTimes(1);
     const [sql, from, to] = getAllAsync.mock.calls[0];
-    expect(sql).toContain('WHERE date >= ? AND date <= ?');
-    expect(from).toBe('2026-08-01');
-    expect(to).toBe('2026-08-31');
+    expect(sql).toContain("WHERE date >= ? AND date <= ?");
+    expect(from).toBe("2026-08-01");
+    expect(to).toBe("2026-08-31");
   });
 
-  it('getRunningBalance returns the cumulative balance through the given date', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("getRunningBalance returns the cumulative balance through the given date", async () => {
+    const { getDatabase } = require("@/db/database");
     const db = freshDb();
     seed(db, [
-      { type: 'income', amount: 1000, date: '2026-08-01', kind: 'opening' },
-      { type: 'income', amount: 2000, date: '2026-08-01', kind: 'opening' },
-      { type: 'expense', amount: 100, date: '2026-08-02' },
-      { type: 'income', amount: 300, date: '2026-08-03' },
+      { type: "income", amount: 1000, date: "2026-08-01", kind: "opening" },
+      { type: "income", amount: 2000, date: "2026-08-01", kind: "opening" },
+      { type: "expense", amount: 100, date: "2026-08-02" },
+      { type: "income", amount: 300, date: "2026-08-03" },
     ]);
     getDatabase.mockReturnValue(adapter(db));
 
-    await expect(getRunningBalance('2026-08-01')).resolves.toBe(3000);
-    await expect(getRunningBalance('2026-08-02')).resolves.toBe(2900);
-    await expect(getRunningBalance('2026-08-03')).resolves.toBe(3200);
+    await expect(getRunningBalance("2026-08-01")).resolves.toBe(3000);
+    await expect(getRunningBalance("2026-08-02")).resolves.toBe(2900);
+    await expect(getRunningBalance("2026-08-03")).resolves.toBe(3200);
   });
 
-  it('a day with no entries still reports the running balance (Cash in Hand not ₹0)', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("a day with no entries still reports the running balance (Cash in Hand not ₹0)", async () => {
+    const { getDatabase } = require("@/db/database");
     const db = freshDb();
-    seed(db, [{ type: 'income', amount: 5000, date: '2026-08-05', kind: 'opening' }]);
+    seed(db, [
+      { type: "income", amount: 5000, date: "2026-08-05", kind: "opening" },
+    ]);
     getDatabase.mockReturnValue(adapter(db));
 
     // Today (2026-08-11) has no entries → listDaySummaries emits no row, but
     // the running balance exists and is what the Cashbook must show.
-    await expect(listDaySummaries('2026-08-11', '2026-08-11')).resolves.toEqual([]);
-    await expect(getRunningBalance('2026-08-11')).resolves.toBe(5000);
+    await expect(listDaySummaries("2026-08-11", "2026-08-11")).resolves.toEqual(
+      [],
+    );
+    await expect(getRunningBalance("2026-08-11")).resolves.toBe(5000);
   });
 
-  it('getDayLedgerSummary synthesizes a row for an entry-less day with the running balance', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("getDayLedgerSummary synthesizes a row for an entry-less day with the running balance", async () => {
+    const { getDatabase } = require("@/db/database");
     const db = freshDb();
-    seed(db, [{ type: 'income', amount: 5000, date: '2026-08-05', kind: 'opening' }]);
+    seed(db, [
+      { type: "income", amount: 5000, date: "2026-08-05", kind: "opening" },
+    ]);
     getDatabase.mockReturnValue(adapter(db));
 
     // This is exactly what the Cashbook / day-detail screens run: no day row
     // exists for 08-11, so the helper builds one with the true Cash in Hand.
-    await expect(getDayLedgerSummary('2026-08-11')).resolves.toEqual({
-      date: '2026-08-11',
+    await expect(getDayLedgerSummary("2026-08-11")).resolves.toEqual({
+      date: "2026-08-11",
       entryCount: 0,
       income: 0,
       expense: 0,
@@ -208,14 +241,14 @@ describe('listDaySummaries — real SQLite', () => {
     });
   });
 
-  it('getDayLedgerSummary returns the real row when the day has entries', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("getDayLedgerSummary returns the real row when the day has entries", async () => {
+    const { getDatabase } = require("@/db/database");
     const db = freshDb();
-    seed(db, [{ type: 'income', amount: 500, date: '2026-08-01' }]);
+    seed(db, [{ type: "income", amount: 500, date: "2026-08-01" }]);
     getDatabase.mockReturnValue(adapter(db));
 
-    await expect(getDayLedgerSummary('2026-08-01')).resolves.toEqual({
-      date: '2026-08-01',
+    await expect(getDayLedgerSummary("2026-08-01")).resolves.toEqual({
+      date: "2026-08-01",
       entryCount: 1,
       income: 500,
       expense: 0,
@@ -223,9 +256,9 @@ describe('listDaySummaries — real SQLite', () => {
     });
   });
 
-  it('latest-day cashInHand = all-transaction net + cash-involving transfer legs', async () => {
-    const { getDatabase } = require('@/db/database');
-    const db = new DatabaseSync(':memory:');
+  it("latest-day cashInHand = all-transaction net + cash-involving transfer legs", async () => {
+    const { getDatabase } = require("@/db/database");
+    const db = new DatabaseSync(":memory:");
     db.exec(`
       CREATE TABLE accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -251,21 +284,18 @@ describe('listDaySummaries — real SQLite', () => {
       );
     `);
     db.exec(
-      `INSERT INTO accounts (id, name, type, opening_balance) VALUES (1, 'Cash', 'cash', 1000), (2, 'Bank', 'bank', 2000);`
+      `INSERT INTO accounts (id, name, type, opening_balance) VALUES (1, 'Cash', 'cash', 1000), (2, 'Bank', 'bank', 2000);`,
     );
     const ins = db.prepare(
-      'INSERT INTO transactions (type, amount, account_id, note, date, kind) VALUES (?, ?, ?, ?, ?, ?)'
+      "INSERT INTO transactions (type, amount, account_id, note, date, kind) VALUES (?, ?, ?, ?, ?, ?)",
     );
-    ins.run('income', 1000, 1, 'Opening Balance', '2026-08-01', 'opening');
-    ins.run('income', 2000, 2, 'Opening Balance', '2026-08-01', 'opening');
-    ins.run('expense', 100, 1, '', '2026-08-02', 'normal');
-    ins.run('income', 300, 1, '', '2026-08-03', 'normal');
-    db.prepare('INSERT INTO transfers (amount, from_account_id, to_account_id, date) VALUES (?, ?, ?, ?)').run(
-      500,
-      1,
-      2,
-      '2026-08-02'
-    );
+    ins.run("income", 1000, 1, "Opening Balance", "2026-08-01", "opening");
+    ins.run("income", 2000, 2, "Opening Balance", "2026-08-01", "opening");
+    ins.run("expense", 100, 1, "", "2026-08-02", "normal");
+    ins.run("income", 300, 1, "", "2026-08-03", "normal");
+    db.prepare(
+      "INSERT INTO transfers (amount, from_account_id, to_account_id, date) VALUES (?, ?, ?, ?)",
+    ).run(500, 1, 2, "2026-08-02");
     getDatabase.mockReturnValue(adapter(db));
 
     const [latest] = await listDaySummaries();
@@ -287,14 +317,14 @@ describe('listDaySummaries — real SQLite', () => {
            - COALESCE((SELECT SUM(tr.amount) FROM transfers tr
                        JOIN accounts fa ON fa.id = tr.from_account_id
                        WHERE fa.type = 'cash'), 0)
-           AS cashInHand`
+           AS cashInHand`,
       )
       .get() as { cashInHand: number };
     expect(latest.cashInHand).toBe(row.cashInHand);
   });
 
-  it('omits bounds SQL when both are undefined', async () => {
-    const { getDatabase } = require('@/db/database');
+  it("omits bounds SQL when both are undefined", async () => {
+    const { getDatabase } = require("@/db/database");
     const dbAdapter = adapter(freshDb());
     const getAllAsync = jest.fn(dbAdapter.getAllAsync);
     getDatabase.mockReturnValue({ ...dbAdapter, getAllAsync });
@@ -304,56 +334,56 @@ describe('listDaySummaries — real SQLite', () => {
     const [sql, ...params] = getAllAsync.mock.calls[0];
     // No date bounds are appended when from/to are omitted (the `day_transfers`
     // CTE has its own cash-involvement WHERE, which is not a range filter)…
-    expect(sql).not.toContain('date >= ? AND date <= ?');
-    expect(sql).not.toContain('WHERE date >=');
+    expect(sql).not.toContain("date >= ? AND date <= ?");
+    expect(sql).not.toContain("WHERE date >=");
     // …and no bound params are bound.
     expect(params).toHaveLength(0);
   });
 });
 
-describe('runningCashInHand — running-total normalization', () => {
+describe("runningCashInHand — running-total normalization", () => {
   const day = (
     date: string,
     income: number,
     expense: number,
-    cashInHand: number
+    cashInHand: number,
   ): DayLedgerSummary => ({ date, entryCount: 1, income, expense, cashInHand });
 
-  it('corrects an off-by-one: 1 Aug shows its own ₹5,000, not the prior ₹0', () => {
+  it("corrects an off-by-one: 1 Aug shows its own ₹5,000, not the prior ₹0", () => {
     // The reported bug: 15 Jul (first entry, balance ₹0) → 1 Aug (balance
     // ₹5,000) but Cash in Hand rendered ₹0 because the current day was excluded.
     // Feed the stale rows (newest-first) exactly as the bug report describes.
     const out = runningCashInHand([
-      day('2026-08-01', 5000, 0, 0), // wrong: omits its own day's balance
-      day('2026-07-15', 0, 0, 0),
+      day("2026-08-01", 5000, 0, 0), // wrong: omits its own day's balance
+      day("2026-07-15", 0, 0, 0),
     ]);
     expect(out.map((d) => d.cashInHand)).toEqual([5000, 0]);
-    expect(out[0].date).toBe('2026-08-01');
+    expect(out[0].date).toBe("2026-08-01");
   });
 
-  it('adds the current day balance to the previous day’s cash in hand', () => {
+  it("adds the current day balance to the previous day’s cash in hand", () => {
     const out = runningCashInHand([
-      day('2026-08-03', 300, 0, 5100),
-      day('2026-08-02', 0, 200, 4800),
-      day('2026-08-01', 1000, 0, 5000),
+      day("2026-08-03", 300, 0, 5100),
+      day("2026-08-02", 0, 200, 4800),
+      day("2026-08-01", 1000, 0, 5000),
     ]);
     // 08-01: 5000 · 08-02: 5000 − 200 = 4800 · 08-03: 4800 + 300 = 5100.
     expect(out.map((d) => d.cashInHand)).toEqual([5100, 4800, 5000]);
   });
 
-  it('keeps the earliest row’s pre-range carry-in intact', () => {
+  it("keeps the earliest row’s pre-range carry-in intact", () => {
     // First in-range day carries a balance that existed before the range.
     const out = runningCashInHand([
-      day('2026-08-02', 0, 50, 350),
-      day('2026-08-01', 500, 100, 400),
+      day("2026-08-02", 0, 50, 350),
+      day("2026-08-01", 500, 100, 400),
     ]);
     expect(out[1].cashInHand).toBe(400); // unchanged seed
     expect(out[0].cashInHand).toBe(350); // 400 − 50
   });
 
-  it('returns empty and single rows untouched', () => {
+  it("returns empty and single rows untouched", () => {
     expect(runningCashInHand([])).toEqual([]);
-    const single = [day('2026-08-01', 500, 0, 500)];
+    const single = [day("2026-08-01", 500, 0, 500)];
     expect(runningCashInHand(single)).toEqual(single);
   });
 });

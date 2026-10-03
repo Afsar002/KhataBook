@@ -7,6 +7,7 @@
  * triggers really keep the index in sync through inserts, updates, deletes and
  * account/category renames — the cases a broken trigger would silently miss.
  */
+//eslint-disable-next-line import/no-unresolved
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
