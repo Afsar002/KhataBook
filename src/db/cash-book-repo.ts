@@ -12,7 +12,39 @@
  * flows through the same `income - expense` aggregation here.
  */
 import { getDatabase } from '@/db/database';
-import type { CashBook } from '@/types';
+import {
+  LEDGER_PAGE_SIZE,
+  TRANSFER_ID_OFFSET,
+  type LedgerCursor,
+} from '@/db/transaction-repo';
+import { safeParseAttachments } from '@/utils/attachments';
+import type { Href } from 'expo-router';
+import type { CashBook, CashBookEntry } from '@/types';
+
+/**
+ * Route (with `editId`) that opens a cash entry in its edit form.
+ * Transfer rows carry offset ids (`TRANSFER_ID_OFFSET`) in history pages but
+ * raw ids in day pages — `transferId` (when present) wins, otherwise the
+ * offset is stripped. Opening rows are immutable → null (non-tappable).
+ */
+export function editRouteForCashEntry(entry: CashBookEntry): Href | null {
+  if (entry.type === 'opening' || entry.entryKind === 'opening') {
+    return null;
+  }
+  if (entry.type === 'transfer_in' || entry.type === 'transfer_out' || entry.type === 'transfer_internal') {
+    const targetId =
+      entry.transferId && entry.transferId > 0
+        ? entry.transferId
+        : entry.id >= TRANSFER_ID_OFFSET
+          ? entry.id - TRANSFER_ID_OFFSET
+          : entry.id;
+    return { pathname: '/transfer', params: { editId: String(targetId) } } as Href;
+  }
+  if (entry.type === 'income') {
+    return { pathname: '/income', params: { editId: String(entry.id) } } as Href;
+  }
+  return { pathname: '/expense', params: { editId: String(entry.id) } } as Href;
+}
 
 export async function getCashBook(date: string): Promise<CashBook> {
   const db = getDatabase();
@@ -116,19 +148,177 @@ export async function clearCashCount(date: string): Promise<void> {
   await db.runAsync('DELETE FROM cash_counts WHERE date = ?', date);
 }
 
-/**
- * Cash book entry with running balance (for detailed view like khata).
- */
-export interface CashBookEntry {
+/** All-time cash balance (every `type='cash'` account combined) — running-balance anchor. */
+export async function getCashTotalBalance(): Promise<number> {
+  const db = getDatabase();
+  const row = await db.getFirstAsync<{ total: number }>(
+    `
+    SELECT
+      COALESCE(
+        (SELECT SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END)
+         FROM transactions t JOIN accounts a ON a.id = t.account_id
+         WHERE a.type = 'cash'),
+        0
+      )
+      + COALESCE(
+          (SELECT SUM(tr.amount) FROM transfers tr JOIN accounts a ON a.id = tr.to_account_id
+           WHERE a.type = 'cash'),
+          0
+        )
+      - COALESCE(
+          (SELECT SUM(tr.amount) FROM transfers tr JOIN accounts a ON a.id = tr.from_account_id
+           WHERE a.type = 'cash'),
+          0
+        )
+      AS total
+    `
+  );
+  return row?.total ?? 0;
+}
+
+export interface CashLedgerPage {
+  rows: CashBookEntry[];
+  hasMore: boolean;
+  nextCursor: LedgerCursor | null;
+}
+
+type CashLedgerRawRow = {
   id: number;
   date: string;
   time: string;
-  type: 'income' | 'expense' | 'transfer_in' | 'transfer_out' | 'opening';
+  createdAt: string;
+  kind: 'income' | 'expense' | 'transfer';
+  entryKind: 'normal' | 'opening';
   amount: number;
-  note: string | null;
-  category: string | null;
-  account: string | null;
-  runningBalance: number;
+  note: string;
+  categoryName: string | null;
+  accountName: string | null;
+  attachmentsRaw: string | null;
+  fromCash: number;
+  toCash: number;
+  fromAccountName: string | null;
+  toAccountName: string | null;
+  /** Real transfer id (before TRANSFER_ID_OFFSET); 0 for transactions. */
+  transferId: number;
+};
+
+/**
+ * One page of the cash history ledger, newest first. Single union query:
+ * cash `transactions` (join `accounts.type='cash'`) + cash-involving
+ * `transfers` (direction from the `type` join, never the account name).
+ * Cash↔cash internal moves emit one net-zero `transfer_internal` row so day
+ * totals reconcile. Keyset cursor `(date, id)` with transfer ids offset by
+ * `TRANSFER_ID_OFFSET` so they never collide with transaction ids.
+ */
+export async function listCashLedgerPage(cursor?: LedgerCursor | null): Promise<CashLedgerPage> {
+  const db = getDatabase();
+  const params: (string | number)[] = [];
+  const where = cursor ? 'AND (feed.date < ? OR (feed.date = ? AND feed.id < ?))' : '';
+  if (cursor) {
+    params.push(cursor.date, cursor.date, cursor.id);
+  }
+  const raw = await db.getAllAsync<CashLedgerRawRow>(
+    `
+    SELECT * FROM (
+      SELECT
+        t.id AS id,
+        t.date AS date,
+        t.time AS time,
+        t.created_at AS createdAt,
+        t.type AS kind,
+        t.amount AS amount,
+        t.note AS note,
+        c.name AS categoryName,
+        a.name AS accountName,
+        t.attachments AS attachmentsRaw,
+        0 AS fromCash,
+        0 AS toCash,
+        NULL AS fromAccountName,
+        NULL AS toAccountName,
+        0 AS transferId,
+        t.kind AS entryKind
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id
+      LEFT JOIN categories c ON c.id = t.category_id
+      WHERE a.type = 'cash'
+      UNION ALL
+      SELECT
+        tr.id + ${TRANSFER_ID_OFFSET} AS id,
+        tr.date AS date,
+        tr.time AS time,
+        tr.created_at AS createdAt,
+        'transfer' AS kind,
+        tr.amount AS amount,
+        tr.note AS note,
+        NULL AS categoryName,
+        NULL AS accountName,
+        NULL AS attachmentsRaw,
+        CASE WHEN fa.type = 'cash' THEN 1 ELSE 0 END AS fromCash,
+        CASE WHEN ta.type = 'cash' THEN 1 ELSE 0 END AS toCash,
+        fa.name AS fromAccountName,
+        ta.name AS toAccountName,
+        tr.id AS transferId,
+        'normal' AS entryKind
+      FROM transfers tr
+      JOIN accounts fa ON fa.id = tr.from_account_id
+      JOIN accounts ta ON ta.id = tr.to_account_id
+      WHERE fa.type = 'cash' OR ta.type = 'cash'
+    ) AS feed
+    WHERE 1 = 1 ${where}
+    ORDER BY feed.date DESC, feed.id DESC
+    LIMIT ${LEDGER_PAGE_SIZE + 1}
+    `,
+    ...params
+  );
+  const rows: CashBookEntry[] = raw.map((r) => {
+    if (r.kind === 'transfer') {
+      const internal = r.fromCash === 1 && r.toCash === 1;
+      const transferIn = !internal && r.toCash === 1;
+      return {
+        id: r.id,
+        transferId: r.transferId,
+        date: r.date,
+        time: r.time ?? '',
+        createdAt: r.createdAt ?? '',
+        type: internal ? 'transfer_internal' : transferIn ? 'transfer_in' : 'transfer_out',
+        amount: r.amount,
+        note: r.note ?? '',
+        category: null,
+        // Show the other side: money in ← from, money out → to.
+        account: internal
+          ? `${r.fromAccountName ?? 'Cash'} → ${r.toAccountName ?? 'Cash'}`
+          : transferIn
+            ? (r.fromAccountName ?? '')
+            : (r.toAccountName ?? ''),
+        hasAttachments: false,
+        entryKind: 'normal' as const,
+        runningBalance: 0,
+      };
+    }
+    return {
+      id: r.id,
+      transferId: 0,
+      date: r.date,
+      time: r.time ?? '',
+      createdAt: r.createdAt ?? '',
+      type: r.kind as 'income' | 'expense',
+      amount: r.amount,
+      note: r.note ?? '',
+      category: r.categoryName,
+      account: r.accountName,
+      hasAttachments: safeParseAttachments(r.attachmentsRaw).length > 0,
+      entryKind: r.entryKind,
+      runningBalance: 0,
+    };
+  });
+  const hasMore = rows.length > LEDGER_PAGE_SIZE;
+  const page = hasMore ? rows.slice(0, LEDGER_PAGE_SIZE) : rows;
+  const last = page[page.length - 1];
+  return {
+    rows: page,
+    hasMore,
+    nextCursor: hasMore && last ? { date: last.date, id: last.id } : null,
+  };
 }
 
 /**
@@ -196,7 +386,7 @@ export async function getCashBookEntries(date: string): Promise<CashBookEntry[]>
     date
   );
 
-  // Get all transfers for this day
+  // Get all transfers for this day (direction from the account TYPE join — never the name)
   const transfers = await db.getAllAsync<{
     id: number;
     date: string;
@@ -205,6 +395,8 @@ export async function getCashBookEntries(date: string): Promise<CashBookEntry[]>
     note: string | null;
     from_account: string | null;
     to_account: string | null;
+    from_type: string | null;
+    to_type: string | null;
   }>(
     `
     SELECT
@@ -214,7 +406,9 @@ export async function getCashBookEntries(date: string): Promise<CashBookEntry[]>
       tr.amount,
       tr.note,
       fa.name AS from_account,
-      ta.name AS to_account
+      ta.name AS to_account,
+      fa.type AS from_type,
+      ta.type AS to_type
     FROM transfers tr
     LEFT JOIN accounts fa ON fa.id = tr.from_account_id
     LEFT JOIN accounts ta ON ta.id = tr.to_account_id
@@ -228,7 +422,6 @@ export async function getCashBookEntries(date: string): Promise<CashBookEntry[]>
   const combined: CashBookEntry[] = [];
 
   for (const t of transactions) {
-    const isIncome = t.type === 'income';
     combined.push({
       id: t.id,
       date: t.date,
@@ -243,21 +436,21 @@ export async function getCashBookEntries(date: string): Promise<CashBookEntry[]>
   }
 
   for (const tr of transfers) {
-    const isTransferIn = tr.to_account && !tr.from_account?.includes('cash'); // simplified
-    const fromCash = tr.from_account?.toLowerCase().includes('cash');
-    const toCash = tr.to_account?.toLowerCase().includes('cash');
+    const fromCash = tr.from_type === 'cash';
+    const toCash = tr.to_type === 'cash';
 
-    // Only include transfers where cash account is involved
+    // Only include transfers where a cash account is involved
     if (fromCash || toCash) {
+      const internal = fromCash && toCash;
       combined.push({
         id: tr.id,
         date: tr.date,
         time: tr.time,
-        type: toCash ? 'transfer_in' : 'transfer_out',
+        type: internal ? 'transfer_internal' : toCash ? 'transfer_in' : 'transfer_out',
         amount: tr.amount,
         note: tr.note,
         category: null,
-        account: toCash ? tr.from_account : tr.to_account,
+        account: internal ? `${tr.from_account ?? 'Cash'} → ${tr.to_account ?? 'Cash'}` : toCash ? tr.from_account : tr.to_account,
         runningBalance: 0,
       });
     }
@@ -270,9 +463,13 @@ export async function getCashBookEntries(date: string): Promise<CashBookEntry[]>
     return a.id - b.id;
   });
 
-  // Calculate running balance forward from opening
+  // Calculate running balance forward from opening (internal moves are net-zero)
   let running = openingBalance;
   for (const entry of combined) {
+    if (entry.type === 'transfer_internal') {
+      entry.runningBalance = running;
+      continue;
+    }
     const increasesBalance = entry.type === 'income' || entry.type === 'transfer_in';
     running += increasesBalance ? entry.amount : -entry.amount;
     entry.runningBalance = running;

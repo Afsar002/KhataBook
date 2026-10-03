@@ -239,26 +239,32 @@ export interface CashBook {
   actual: number;
 }
 
-/**
- * Detailed cash book entry with running balance (for ledger view).
- */
+/** Detailed cash book entry with running balance (for ledger view). */
 export interface CashBookEntry {
-  /** Entry ID (0 = opening balance). */
+  /** Entry ID (0 = opening balance; transfer rows are offset by TRANSFER_ID_OFFSET). */
   id: number;
+  /** Real transfer id for transfer rows; 0 for transactions/opening. */
+  transferId?: number;
   /** Date (`YYYY-MM-DD`). */
   date: string;
   /** Time (`HH:MM`). */
   time: string;
-  /** Entry type. */
-  type: 'income' | 'expense' | 'transfer_in' | 'transfer_out' | 'opening';
+  /** ISO created-at; '' when unknown. */
+  createdAt?: string;
+  /** Entry type. `transfer_internal` is a cash↔cash move (net-zero). */
+  type: 'income' | 'expense' | 'transfer_in' | 'transfer_out' | 'transfer_internal' | 'opening';
   /** Amount. */
   amount: number;
   /** Note / narration. */
   note: string | null;
   /** Category name (for income/expense). */
   category: string | null;
-  /** Account name (for transfers). */
+  /** Account name (for transfers: the other side; internal: "From → To"). */
   account: string | null;
+  /** 'opening' for immutable Opening Balance rows, 'normal' otherwise. */
+  entryKind?: 'normal' | 'opening';
+  /** True when the entry has attachment(s) — shows the paperclip indicator. */
+  hasAttachments?: boolean;
   /** Running balance after this entry. */
   runningBalance: number;
 }
