@@ -9,29 +9,47 @@
  * The `Day | History` toggle switches to a khata-style grouped ledger of
  * every cash entry (newest first) with infinite scroll and tap-to-edit.
  */
-import { router, useFocusEffect } from 'expo-router';
-import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Scale } from 'lucide-react-native';
-import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, SectionList, StyleSheet, View } from 'react-native';
+import { router, useFocusEffect } from "expo-router";
+import {
+    CalendarDays,
+    CheckCircle2,
+    ChevronLeft,
+    ChevronRight,
+    Scale,
+} from "lucide-react-native";
+import { useCallback, useMemo, useState } from "react";
+import {
+    ActivityIndicator,
+    Pressable,
+    SectionList,
+    StyleSheet,
+    View,
+} from "react-native";
 
-import { AmountInput } from '@/components/amount-input';
-import { Card } from '@/components/card';
-import { EmptyState } from '@/components/empty-state';
-import { LargeButton } from '@/components/large-button';
-import { PartyDayEntryCard } from '@/components/party-day-entry-card';
-import { Screen } from '@/components/screen';
-import { ScreenHeader } from '@/components/screen-header';
-import { Segment } from '@/components/segment';
-import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
-import { editRouteForCashEntry } from '@/db/cash-book-repo';
-import { useCashBook } from '@/hooks/use-cash-book';
-import { cashHistoryEffect, useCashHistory } from '@/hooks/use-cash-history';
-import { useTheme } from '@/hooks/use-theme';
-import { formatDateLabel, formatINR, formatISOToDisplay, shiftISODate, todayISODate } from '@/utils/format';
-import type { CashBookEntry } from '@/types';
+import { AmountInput } from "@/components/amount-input";
+import { Card } from "@/components/card";
+import { EmptyState } from "@/components/empty-state";
+import { LargeButton } from "@/components/large-button";
+import { PartyDayEntryCard } from "@/components/party-day-entry-card";
+import { Screen } from "@/components/screen";
+import { ScreenHeader } from "@/components/screen-header";
+import { Segment } from "@/components/segment";
+import { ThemedText } from "@/components/themed-text";
+import { Spacing } from "@/constants/theme";
+import { editRouteForCashEntry } from "@/db/cash-book-repo";
+import { useCashBook } from "@/hooks/use-cash-book";
+import { cashHistoryEffect, useCashHistory } from "@/hooks/use-cash-history";
+import { useTheme } from "@/hooks/use-theme";
+import type { CashBookEntry } from "@/types";
+import {
+    formatDateLabel,
+    formatINR,
+    formatISOToDisplay,
+    shiftISODate,
+    todayISODate,
+} from "@/utils/format";
 
-type CashView = 'day' | 'history';
+type CashView = "day" | "history";
 
 /** One date group in the history ledger: the day's entries + Out/In totals. */
 type CashDayGroup = {
@@ -42,52 +60,59 @@ type CashDayGroup = {
 };
 
 /** Maps a history entry to its Out / In cells (khata-style). */
-function historyOutIn(entry: CashBookEntry): { give: number | null; receive: number | null } {
+function historyOutIn(entry: CashBookEntry): {
+  give: number | null;
+  receive: number | null;
+} {
   switch (entry.type) {
-    case 'expense':
-    case 'transfer_out':
+    case "expense":
+    case "transfer_out":
       return { give: entry.amount, receive: null };
-    case 'income':
-    case 'transfer_in':
+    case "income":
+    case "transfer_in":
       return { give: null, receive: entry.amount };
-    case 'transfer_internal':
+    case "transfer_internal":
       // Cash↔cash internal move: net-zero, but visible on both sides so the
       // day totals reconcile with closing = opening + In − Out.
       return { give: entry.amount, receive: entry.amount };
-    case 'opening':
+    case "opening":
       return { give: null, receive: null };
   }
 }
 
 /** Label shown under the time in a history card. */
 function historyNote(entry: CashBookEntry): string {
-  if (entry.type === 'transfer_in' || entry.type === 'transfer_out' || entry.type === 'transfer_internal') {
-    const other = (entry.account ?? '').trim();
-    const note = (entry.note ?? '').trim();
+  if (
+    entry.type === "transfer_in" ||
+    entry.type === "transfer_out" ||
+    entry.type === "transfer_internal"
+  ) {
+    const other = (entry.account ?? "").trim();
+    const note = (entry.note ?? "").trim();
     if (other && note) {
       return `${other} · ${note}`;
     }
     return other || note;
   }
-  if (entry.type === 'income' || entry.type === 'expense') {
-    const category = (entry.category ?? '').trim();
-    const note = (entry.note ?? '').trim();
+  if (entry.type === "income" || entry.type === "expense") {
+    const category = (entry.category ?? "").trim();
+    const note = (entry.note ?? "").trim();
     if (category && note) {
       return `${category} · ${note}`;
     }
     return category || note;
   }
-  return entry.note ?? '';
+  return entry.note ?? "";
 }
 
 export default function CashBookScreen() {
   const theme = useTheme();
   const today = todayISODate();
   const [date, setDate] = useState(today);
-  const [view, setView] = useState<CashView>('day');
+  const [view, setView] = useState<CashView>("day");
   const { book, entries, loading, saveCount, clearCount } = useCashBook(date);
   const history = useCashHistory();
-  const [actual, setActual] = useState('');
+  const [actual, setActual] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -97,10 +122,10 @@ export default function CashBookScreen() {
   const historyRefresh = history.refresh;
   useFocusEffect(
     useCallback(() => {
-      if (view === 'history') {
+      if (view === "history") {
         void historyRefresh();
       }
-    }, [view, historyRefresh])
+    }, [view, historyRefresh]),
   );
 
   /** Groups the (already newest-first) history ledger by date, totalling Out/In. */
@@ -118,7 +143,7 @@ export default function CashBookScreen() {
         group.out += entry.amount;
       } else if (effect > 0) {
         group.in += entry.amount;
-      } else if (entry.type === 'transfer_internal') {
+      } else if (entry.type === "transfer_internal") {
         group.out += entry.amount;
         group.in += entry.amount;
       }
@@ -143,7 +168,7 @@ export default function CashBookScreen() {
 
   const switchDate = (next: string) => {
     setDate(next);
-    setActual('');
+    setActual("");
     setSaved(false);
   };
 
@@ -156,7 +181,7 @@ export default function CashBookScreen() {
       const value = actual ? parseFloat(actual) : 0;
       await saveCount(value);
       setSaved(true);
-      setActual('');
+      setActual("");
     } finally {
       setSaving(false);
     }
@@ -167,7 +192,7 @@ export default function CashBookScreen() {
       return;
     }
     await clearCount();
-    setActual('');
+    setActual("");
     setSaved(false);
   };
 
@@ -180,14 +205,14 @@ export default function CashBookScreen() {
 
   const statusText =
     !book || book.actual === 0
-      ? 'Enter the counted cash to reconcile this day.'
+      ? "Enter the counted cash to reconcile this day."
       : difference === 0
-        ? 'Balanced — the counted cash matches the book.'
+        ? "Balanced — the counted cash matches the book."
         : difference > 0
           ? `Cash short by ${formatINR(difference)} — counted less than the book.`
           : `Cash extra by ${formatINR(Math.abs(difference))} — counted more than the book.`;
 
-  const isDay = view === 'day';
+  const isDay = view === "day";
 
   return (
     <Screen scroll={isDay}>
@@ -195,8 +220,8 @@ export default function CashBookScreen() {
 
       <Segment
         options={[
-          { key: 'day', label: 'Day' },
-          { key: 'history', label: 'History' },
+          { key: "day", label: "Day" },
+          { key: "history", label: "History" },
         ]}
         value={view}
         onChange={(key) => setView(key as CashView)}
@@ -204,132 +229,197 @@ export default function CashBookScreen() {
 
       {isDay ? (
         <>
-      <Card style={styles.dateCard}>
-        <Pressable
-          onPress={() => switchDate(shiftISODate(date, -1))}
-          accessibilityRole="button"
-          accessibilityLabel="Previous day"
-          hitSlop={8}
-          style={[styles.dateButton, { backgroundColor: theme.backgroundElement }]}>
-          <ChevronLeft size={20} color={theme.text} />
-        </Pressable>
-        <View style={styles.dateCenter}>
-          <ThemedText type="smallBold" style={styles.dateLabel}>
-            {formatDateLabel(date)}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {new Date(`${date}T00:00:00`).toLocaleDateString('en-IN', {
-              weekday: 'short',
-              day: 'numeric',
-              month: 'long',
-              year: 'numeric',
-            })}
-          </ThemedText>
-        </View>
-        <Pressable
-          onPress={() => switchDate(shiftISODate(date, 1))}
-          accessibilityRole="button"
-          accessibilityLabel="Next day"
-          disabled={isToday}
-          hitSlop={8}
-          style={[
-            styles.dateButton,
-            { backgroundColor: theme.backgroundElement, opacity: isToday ? 0.35 : 1 },
-          ]}>
-          <ChevronRight size={20} color={theme.text} />
-        </Pressable>
-      </Card>
+          <Card style={styles.dateCard}>
+            <Pressable
+              onPress={() => switchDate(shiftISODate(date, -1))}
+              accessibilityRole="button"
+              accessibilityLabel="Previous day"
+              hitSlop={8}
+              style={[
+                styles.dateButton,
+                { backgroundColor: theme.backgroundElement },
+              ]}
+            >
+              <ChevronLeft size={20} color={theme.text} />
+            </Pressable>
+            <View style={styles.dateCenter}>
+              <ThemedText type="smallBold" style={styles.dateLabel}>
+                {formatDateLabel(date)}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                {new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", {
+                  weekday: "short",
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                })}
+              </ThemedText>
+            </View>
+            <Pressable
+              onPress={() => switchDate(shiftISODate(date, 1))}
+              accessibilityRole="button"
+              accessibilityLabel="Next day"
+              disabled={isToday}
+              hitSlop={8}
+              style={[
+                styles.dateButton,
+                {
+                  backgroundColor: theme.backgroundElement,
+                  opacity: isToday ? 0.35 : 1,
+                },
+              ]}
+            >
+              <ChevronRight size={20} color={theme.text} />
+            </Pressable>
+          </Card>
 
-      <Card style={styles.summaryCard}>
-        <SummaryRow label="Opening balance" value={book?.opening ?? 0} />
-        <SummaryRow label="Cash received" value={book?.income ?? 0} color={theme.income} plus />
-        <SummaryRow label="Cash spent" value={book?.expense ?? 0} color={theme.expense} minus />
-        <SummaryRow label="Transferred in" value={book?.transferIn ?? 0} color={theme.income} plus />
-        <SummaryRow label="Transferred out" value={book?.transferOut ?? 0} color={theme.expense} minus />
-        <View style={[styles.divider, { backgroundColor: theme.border }]} />
-        <View style={styles.closingRow}>
-          <ThemedText type="smallBold">Expected cash in hand</ThemedText>
-          <ThemedText style={[styles.closingValue, { color: theme.primary }]}>
-            {formatINR(book?.closing ?? 0)}
-          </ThemedText>
-        </View>
-      </Card>
-
-      <Card style={styles.reconcileCard}>
-        <View style={styles.reconcileTitle}>
-          <Scale size={18} color={theme.text} />
-          <ThemedText type="smallBold" style={styles.reconcileTitleText}>
-            Reconciliation
-          </ThemedText>
-        </View>
-        <AmountInput value={actual} onChangeText={setActual} />
-        <ThemedText type="small" themeColor="textSecondary">
-          The cash you actually counted in hand for this day.
-        </ThemedText>
-
-        <View style={[styles.statusRow, { backgroundColor: theme.backgroundElement }]}>
-          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-          <ThemedText type="small" style={[styles.statusText, { color: statusColor }]}>
-            {loading ? 'Loading…' : statusText}
-          </ThemedText>
-        </View>
-
-        <LargeButton
-          title={saved ? 'Saved' : 'Save Count'}
-          variant="primary"
-          icon={saved ? CheckCircle2 : undefined}
-          onPress={handleSave}
-          disabled={saving || !book}
-        />
-        {book && book.actual > 0 ? (
-          <LargeButton title="Clear Count" variant="outline" onPress={handleClear} />
-        ) : null}
-      </Card>
-
-      {loading ? null : (
-        <View style={styles.ledgerSection}>
-          <ThemedText type="smallBold" style={styles.ledgerHeader}>
-            Day&apos;s Entries
-          </ThemedText>
-          {entries.length === 0 ? (
-            <ThemedText type="small" themeColor="textSecondary" style={styles.emptyLedger}>
-              No cash entries for this day.
-            </ThemedText>
-          ) : (
-            <SectionList
-              sections={[{ title: date, data: entries }]}
-              renderItem={({ item }: { item: CashBookEntry }) => (
-                <DayEntryRow item={item} onPress={() => openHistoryEntry(item)} />
-              )}
-              keyExtractor={(item, index) =>
-                item.type === 'transfer_in' || item.type === 'transfer_out' || item.type === 'transfer_internal'
-                  ? `transfer-${item.transferId ?? item.id}-${index}`
-                  : `${item.type}-${item.id}-${index}`
-              }
-              stickySectionHeadersEnabled={false}
-              contentContainerStyle={styles.ledgerList}
+          <Card style={styles.summaryCard}>
+            <SummaryRow label="Opening balance" value={book?.opening ?? 0} />
+            <SummaryRow
+              label="Cash received"
+              value={book?.income ?? 0}
+              color={theme.income}
+              plus
             />
-          )}
-        </View>
-      )}
+            <SummaryRow
+              label="Cash spent"
+              value={book?.expense ?? 0}
+              color={theme.expense}
+              minus
+            />
+            <SummaryRow
+              label="Transferred in"
+              value={book?.transferIn ?? 0}
+              color={theme.income}
+              plus
+            />
+            <SummaryRow
+              label="Transferred out"
+              value={book?.transferOut ?? 0}
+              color={theme.expense}
+              minus
+            />
+            <View style={[styles.divider, { backgroundColor: theme.border }]} />
+            <View style={styles.closingRow}>
+              <ThemedText type="smallBold">Expected cash in hand</ThemedText>
+              <ThemedText
+                style={[styles.closingValue, { color: theme.primary }]}
+              >
+                {formatINR(book?.closing ?? 0)}
+              </ThemedText>
+            </View>
+          </Card>
 
-      <View style={styles.hint}>
-        <CalendarDays size={14} color={theme.textSecondary} />
-        <ThemedText type="small" themeColor="textSecondary">
-          Count your cash at closing time to catch missing or extra money.
-        </ThemedText>
-      </View>
+          <Card style={styles.reconcileCard}>
+            <View style={styles.reconcileTitle}>
+              <Scale size={18} color={theme.text} />
+              <ThemedText type="smallBold" style={styles.reconcileTitleText}>
+                Reconciliation
+              </ThemedText>
+            </View>
+            <AmountInput value={actual} onChangeText={setActual} />
+            <ThemedText type="small" themeColor="textSecondary">
+              The cash you actually counted in hand for this day.
+            </ThemedText>
+
+            <View
+              style={[
+                styles.statusRow,
+                { backgroundColor: theme.backgroundElement },
+              ]}
+            >
+              <View
+                style={[styles.statusDot, { backgroundColor: statusColor }]}
+              />
+              <ThemedText
+                type="small"
+                style={[styles.statusText, { color: statusColor }]}
+              >
+                {loading ? "Loading…" : statusText}
+              </ThemedText>
+            </View>
+
+            <LargeButton
+              title={saved ? "Saved" : "Save Count"}
+              variant="primary"
+              icon={saved ? CheckCircle2 : undefined}
+              onPress={handleSave}
+              disabled={saving || !book}
+            />
+            {book && book.actual > 0 ? (
+              <LargeButton
+                title="Clear Count"
+                variant="outline"
+                onPress={handleClear}
+              />
+            ) : null}
+          </Card>
+
+          {loading ? null : (
+            <View style={styles.ledgerSection}>
+              <ThemedText type="smallBold" style={styles.ledgerHeader}>
+                Day&apos;s Entries
+              </ThemedText>
+              {entries.length === 0 ? (
+                <ThemedText
+                  type="small"
+                  themeColor="textSecondary"
+                  style={styles.emptyLedger}
+                >
+                  No cash entries for this day.
+                </ThemedText>
+              ) : (
+                <SectionList
+                  sections={[{ title: date, data: entries }]}
+                  renderItem={({ item }: { item: CashBookEntry }) => (
+                    <DayEntryRow
+                      item={item}
+                      onPress={() => openHistoryEntry(item)}
+                    />
+                  )}
+                  keyExtractor={(item, index) =>
+                    item.type === "transfer_in" ||
+                    item.type === "transfer_out" ||
+                    item.type === "transfer_internal"
+                      ? `transfer-${item.transferId ?? item.id}-${index}`
+                      : `${item.type}-${item.id}-${index}`
+                  }
+                  stickySectionHeadersEnabled={false}
+                  contentContainerStyle={styles.ledgerList}
+                />
+              )}
+            </View>
+          )}
+
+          <View style={styles.hint}>
+            <CalendarDays size={14} color={theme.textSecondary} />
+            <ThemedText type="small" themeColor="textSecondary">
+              Count your cash at closing time to catch missing or extra money.
+            </ThemedText>
+          </View>
         </>
       ) : (
         <View style={styles.historyWrap}>
           <View style={styles.columnHeaders}>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.columnHeaderTime}>
+            <ThemedText
+              type="small"
+              themeColor="textSecondary"
+              style={styles.columnHeaderTime}
+            >
               Entries
             </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.columnHeaderGive}>
+            <ThemedText
+              type="small"
+              themeColor="textSecondary"
+              style={styles.columnHeaderGive}
+            >
               Out
             </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.columnHeaderReceive}>
+            <ThemedText
+              type="small"
+              themeColor="textSecondary"
+              style={styles.columnHeaderReceive}
+            >
               In
             </ThemedText>
           </View>
@@ -341,7 +431,9 @@ export default function CashBookScreen() {
               data: group.entries,
             }))}
             keyExtractor={(item, index) =>
-              item.type === 'transfer_in' || item.type === 'transfer_out' || item.type === 'transfer_internal'
+              item.type === "transfer_in" ||
+              item.type === "transfer_out" ||
+              item.type === "transfer_internal"
                 ? `transfer-${item.transferId ?? item.id}-${index}`
                 : `${item.type}-${item.id}-${index}`
             }
@@ -360,11 +452,18 @@ export default function CashBookScreen() {
               />
             )}
             renderItem={({ item }: { item: CashBookEntry }) => (
-              <HistoryEntryRow item={item} onPress={() => openHistoryEntry(item)} />
+              <HistoryEntryRow
+                item={item}
+                onPress={() => openHistoryEntry(item)}
+              />
             )}
             ItemSeparatorComponent={() => <View style={styles.separator} />}
-            SectionSeparatorComponent={() => <View style={styles.sectionSeparator} />}
-            onEndReached={history.hasMore ? () => void history.loadMore() : undefined}
+            SectionSeparatorComponent={() => (
+              <View style={styles.sectionSeparator} />
+            )}
+            onEndReached={
+              history.hasMore ? () => void history.loadMore() : undefined
+            }
             onEndReachedThreshold={0.4}
             ListFooterComponent={
               history.loadingMore ? (
@@ -397,15 +496,23 @@ export default function CashBookScreen() {
 }
 
 /** Day-view row: Out/In cells + tap-to-edit (opening rows stay plain). */
-function DayEntryRow({ item, onPress }: { item: CashBookEntry; onPress: () => void }) {
-  const isInternal = item.type === 'transfer_internal';
-  const isOpening = item.type === 'opening';
+function DayEntryRow({
+  item,
+  onPress,
+}: {
+  item: CashBookEntry;
+  onPress: () => void;
+}) {
+  const isInternal = item.type === "transfer_internal";
+  const isOpening = item.type === "opening";
   const give =
-    (item.type === 'expense' || item.type === 'transfer_out' || isInternal) && !isOpening
+    (item.type === "expense" || item.type === "transfer_out" || isInternal) &&
+    !isOpening
       ? item.amount
       : null;
   const receive =
-    (item.type === 'income' || item.type === 'transfer_in' || isInternal) && !isOpening
+    (item.type === "income" || item.type === "transfer_in" || isInternal) &&
+    !isOpening
       ? item.amount
       : null;
   const route = editRouteForCashEntry(item);
@@ -413,7 +520,7 @@ function DayEntryRow({ item, onPress }: { item: CashBookEntry; onPress: () => vo
     <PartyDayEntryCard
       time={item.time}
       date={item.date}
-      note={item.note ?? ''}
+      note={item.note ?? ""}
       give={give}
       receive={receive}
       runningBalance={item.runningBalance}
@@ -424,7 +531,13 @@ function DayEntryRow({ item, onPress }: { item: CashBookEntry; onPress: () => vo
 }
 
 /** History-view row: Out = expense + transfer_out, In = income + transfer_in. */
-function HistoryEntryRow({ item, onPress }: { item: CashBookEntry; onPress: () => void }) {
+function HistoryEntryRow({
+  item,
+  onPress,
+}: {
+  item: CashBookEntry;
+  onPress: () => void;
+}) {
   const { give, receive } = historyOutIn(item);
   const route = editRouteForCashEntry(item);
   return (
@@ -459,7 +572,7 @@ function CashDayHeader({
       <View style={styles.dayHeaderLeft}>
         <ThemedText type="smallBold">{formatISOToDisplay(date)}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          {count} {count === 1 ? 'entry' : 'entries'}
+          {count} {count === 1 ? "entry" : "entries"}
         </ThemedText>
       </View>
       <View style={styles.dayHeaderTotals}>
@@ -492,7 +605,7 @@ function SummaryRow({
   minus?: boolean;
 }) {
   const theme = useTheme();
-  const prefix = plus ? '+' : minus ? '-' : '';
+  const prefix = plus ? "+" : minus ? "-" : "";
   return (
     <View style={styles.summaryRow}>
       <ThemedText type="default" themeColor="textSecondary">
@@ -508,21 +621,21 @@ function SummaryRow({
 
 const styles = StyleSheet.create({
   dateCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: Spacing.three,
   },
   dateButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   dateCenter: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: "center",
     gap: Spacing.half,
   },
   dateLabel: {
@@ -532,40 +645,40 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   summaryValue: {
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: "Inter_600SemiBold",
     fontSize: 16,
   },
   divider: {
     height: 1,
   },
   closingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   closingValue: {
-    fontFamily: 'Inter_700Bold',
+    fontFamily: "Inter_700Bold",
     fontSize: 24,
   },
   reconcileCard: {
     gap: Spacing.two,
   },
   reconcileTitle: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: Spacing.one,
   },
   reconcileTitleText: {
     fontSize: 16,
   },
   statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: Spacing.two,
     borderRadius: 12,
     paddingHorizontal: Spacing.three,
@@ -580,9 +693,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   hint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: Spacing.one,
   },
   ledgerSection: {
@@ -591,11 +704,11 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   ledgerHeader: {
-    color: 'rgb(14,15,14)',
+    color: "rgb(14,15,14)",
     marginBottom: Spacing.half,
   },
   emptyLedger: {
-    textAlign: 'center',
+    textAlign: "center",
     paddingVertical: Spacing.four,
   },
   ledgerList: {
@@ -606,22 +719,22 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   columnHeaders: {
-    flexDirection: 'row',
+    flexDirection: "row",
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one,
     gap: Spacing.two,
   },
   columnHeaderTime: {
     flex: 2,
-    textAlign: 'left',
+    textAlign: "left",
   },
   columnHeaderGive: {
     flex: 1,
-    textAlign: 'center',
+    textAlign: "center",
   },
   columnHeaderReceive: {
     flex: 1,
-    textAlign: 'right',
+    textAlign: "right",
   },
   historyList: {
     flex: 1,
@@ -630,13 +743,13 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.four,
   },
   historyLoading: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingVertical: Spacing.six,
   },
   dayHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one,
     gap: Spacing.two,
@@ -646,8 +759,8 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   dayHeaderTotals: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: Spacing.two,
   },
   separator: {

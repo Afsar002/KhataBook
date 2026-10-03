@@ -11,7 +11,7 @@ import { useTheme } from '@/hooks/use-theme';
  * Route → tab title/icon, kept in one place so renames are a one-liner.
  *
  * `index` is the Cashbook: expo-router resolves `/` to the `index` route, so
- * making the Cashbook the index (not the `initialRouteName` prop, which
+ * making  the Cashbook the index (not the `initialRouteName` prop, which
  * expo-router overrides with the URL on cold start) is what makes the app
  * open on the Cashbook instead of Home. Home lives at `/home` right beside it.
  */
