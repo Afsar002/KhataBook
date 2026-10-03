@@ -64,10 +64,11 @@ export function Sidebar({ items }: { items: SidebarItem[] }) {
               accessibilityRole="button"
               accessibilityState={{ selected: isActive }}
               accessibilityLabel={title}
-              style={({ hovered }) => [
+              // Cast the callback state to 'any' to expose the web-only 'hovered' property
+              style={(state: any) => [
                 styles.item,
                 isActive && { backgroundColor: theme.primarySoft },
-                hovered && !isActive && { backgroundColor: theme.backgroundElement },
+                state.hovered && !isActive && { backgroundColor: theme.backgroundElement },
               ]}>
               <Icon
                 size={20}
