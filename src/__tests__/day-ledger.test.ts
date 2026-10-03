@@ -8,9 +8,9 @@
  * the query is bounded (Cashbook's "Cash in Hand" is the cumulative running
  * balance over ALL days, not just the visible range).
  */
- //eslint-disable-next-line import/no-unresolved
 
 import type { SQLiteDatabase } from "expo-sqlite";
+ //eslint-disable-next-line import/no-unresolved
 import { DatabaseSync } from "node:sqlite";
 
 import {
